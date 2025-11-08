@@ -1,0 +1,267 @@
+---
+title: \normalsize Assessment 1 \hfill MATH70094 Programming for Data Science \hfill Autumn 2025
+    \rule{\linewidth}{0.5mm}
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## NAME: GRAHAM DIB and CID: 01709270
+
+# Question 2 (20 marks)
+
+You have heard that an experienced spy should not only be proficient in
+Python, but also in R. Your task in this question is to provide R
+statements and functions to encode and decode string messages, as well
+as to do a simple analysis of a message. Some helpful
+functions/techniques for this question are:
+
+-   cat, length, nchar, paste, strsplit, toupper, intToUtf8
+-   sapply, grep, gsup
+-   which, factor
+
+It is easy to see how to use these functions with the R help by typing
+`?length` in the R console. There are usually several ways to answer
+each question, and sometimes you might not use all or even any of the
+suggested functions.
+
+```{r}
+# Do not alter this
+
+msg1 <- "THE PASSWORD IS MY NAME" 
+msg2 <- "I AM A SPY WRITING A SPY MESSAGE"
+msg3 <- "XLMW*MW*XLI*HIVW*WLSYWI*UVG*MW*XLI*WWT*UIAG*OLKDL*XLI*XLMW*AU*AU*XLMW*MW*XLI*HIVW*WLSYWI*UVG*MW*XLI*WWT*UIAG*OLKDL*XLI*XLMW*AU*AU"
+
+# Do not alter this
+```
+
+## Code clarity (1 mark)
+
+There is a famous saying among software developers that code is read
+more often than it is written. Marks will be awarded (or not awarded)
+based on the clarity of the code and appropriate use of comments.
+
+## Part A (2 marks)
+
+Repeat the task in Question 1, Part A, but now using R.
+
+```{r}
+
+is_valid_message <- function(msg) {
+  msg_to_encode <- gsub(" ", "", msg)
+  
+  if (grepl("^[A-Z]+$", msg_to_encode)) {
+    cat("The message contains only capital letters and whitespace: TRUE.\n")
+    return(TRUE)
+  } else {
+    cat("The message contains only capital letters and whitespace: FALSE.\n")
+    return(FALSE)
+  }
+}
+
+is_valid_message(msg1)
+
+
+```
+
+## Part B (8 marks)
+
+Repeat the task in Question 1, Part B, but now using R.
+
+```{r}
+
+# Function to check if the message is valid from A without print statemets
+is_valid_message <- function(msg) {
+  msg_to_encode <- gsub(" ", "", msg)  
+  return(grepl("^[A-Z]+$", msg_to_encode))
+}
+
+# Encoding function
+encode_message <- function(msg) {
+  if (!is_valid_message(msg)) {
+    stop("Message must contain only uppercase letters and spaces.")
+  }
+  
+  #shift by 3
+  shift_char <- function(ch) {
+    if (ch == " ") return(" ")
+    ascii <- utf8ToInt(ch)
+    shifted <- ((ascii - utf8ToInt("A") + 3) %% 26) + utf8ToInt("A")
+    intToUtf8(shifted)
+  }
+  
+  shifted_msg <- paste0(sapply(strsplit(msg, NULL)[[1]], shift_char), collapse = "")
+  
+  # reverse
+  reversed_msg <- paste0(rev(strsplit(shifted_msg, NULL)[[1]]), collapse = "")
+  
+  # replace spaces with asterix
+  asterix_msg <- gsub(" ", "*", reversed_msg)
+  
+  # lowercase letters at even indices (0-indexed)
+  chars <- strsplit(asterix_msg, NULL)[[1]]
+  styled_chars <- sapply(seq_along(chars), function(i) {
+    if ((i-1) %% 2 == 0) {
+      tolower(chars[i])
+    } else {
+      toupper(chars[i])
+    }
+  })
+  styled_msg <- paste0(styled_chars, collapse = "")
+  
+  # add marker
+  encoded_msg <- paste0('"\\#\\#\\#', styled_msg, '\\#\\#\\#"')
+  
+  return(encoded_msg)
+}
+
+
+# Assume msg_to_decode is the encoded message
+msg_to_decode <- encode_message(msg1)
+
+decode_message <- function(msg) {
+  # remove markers, sub failed so resorted to this method
+  cleaned_msg <- substr(msg, 8, nchar(msg) - 7)
+  
+  # uppercase all
+  unstyled_msg <- toupper(cleaned_msg)
+  
+  # astrerix instead of spaces
+  remove_asterix_msg <- gsub("\\*", " ", unstyled_msg)
+  
+  # reverse string
+  unreversed_msg <- paste0(rev(strsplit(remove_asterix_msg, NULL)[[1]]), collapse = "")
+  
+  # unshift
+  unshift_char <- function(ch) {
+    if (ch == " ") return(" ")
+    ascii <- utf8ToInt(ch)
+    shifted <- ((ascii - utf8ToInt("A") - 3) %% 26) + utf8ToInt("A")
+    intToUtf8(shifted)
+  }
+  
+  decoded_msg <- paste0(sapply(strsplit(unreversed_msg, NULL)[[1]], unshift_char), collapse = "")
+  
+  return(decoded_msg)
+}
+
+
+
+
+# Example message
+cat("Original message:", msg1, "\n")
+
+# Encode the message
+encoded_output <- encode_message(msg1)
+cat("Encoded message:", encoded_output, "\n")
+
+# Decode the message
+decoded_output <- decode_message(msg_to_decode)
+cat("Decoded message:", decoded_output, "\n")
+
+```
+
+## Part C (2 marks)
+
+You have intercepted a message string stored in `msg2`. In order to
+identify if this message is important your task is to write R statements
+to locate the first occurrence (index) of the keyword `"SPY"` in the
+message. Print this index preceded by an informative print statement.
+
+For example, if the message string is `"I AM A SPY"`, then you should
+return
+
+`The word index of the first occurrence of the keyword SPY is: 4.`
+
+```{r}
+words <- unlist(strsplit(msg2, " "))
+
+index <- which(words == "SPY")[1]  
+
+cat("The word index of the first occurrence of the keyword SPY is:", index, "\n")
+```
+
+## Part D (4 marks)
+
+You have intercepted another encoded message string stored in `msg3`.
+Your task is to write R statements to analyse the message as follows:
+
+### Part D(i) (2 marks)
+
+Count how often each letter $A,B,..,Z$ appears in the message. Plot a
+bar chart of the letter frequencies.
+
+```{r}
+
+letters <- gsub("\\*", "", msg3)
+
+l_vec <- strsplit(letters, "")
+
+l_vec <- unlist(l_vec)
+
+l_table <- factor(l_vec, levels = LETTERS)
+
+l_freq <- table(l_table)
+
+
+barplot(l_freq)
+```
+
+### Part D(ii) (2 marks)
+
+Compute the length of each word in the message. Plot a histogram of the
+word lengths.
+
+```{r}
+
+words <- unlist(strsplit(msg3, "\\*"))
+
+word_lengths <- nchar(words)
+
+hist(word_lengths)
+
+```
+
+## Part E (3 marks)
+
+Write an R function to generate a spy name from a person's first and
+last names. The function should take as input a string with the person's
+first name and a string with the person's last name, and return a string
+with the spy name. The spy name is generated as follows:
+
+-   Convert the first and last names to uppercase.
+-   Keep the first two letters of the first name, followed by the last
+    two letters of the last name and conclude by a random two-digit
+    number.
+
+Print your spy name preceded by an informative print statement.
+
+```{r}
+
+generate_spy_name <- function(first_name, last_name) {
+  
+  first_name_two_letters <- substr(first_name, 1, 2)
+  
+  last_name_two_letters <- substr(last_name, nchar(last_name) - 1, nchar(last_name))
+  
+  r_number <- sample(10:99, 1)
+  
+  spy_name <- paste0(first_name_two_letters, last_name_two_letters, r_number)
+  
+  cat("Your Spy Name is:", spy_name, "\n")
+  
+  return(spy_name)
+  
+}
+
+generate_spy_name("Graham", "Dib")
+  
+
+```
