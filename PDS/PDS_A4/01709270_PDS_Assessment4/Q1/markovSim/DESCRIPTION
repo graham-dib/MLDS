@@ -1,0 +1,14 @@
+Package: markovSim
+Title: Implements and analyses discrete-time Markov chains using R6 classes.
+Version: 0.0.1
+Authors@R: 
+    person("Graham", "Dib", , "gd619@ic.ac.uk", role = c("aut", "cre"))
+Description: Simulation for finite-state discrete-time Markov chains. Calculates marginal distributions, empirical distributions, and approximates the stationary distribution. Allows basic analysis through visualisation tools (directed weighted graph plot).
+License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
+    license
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

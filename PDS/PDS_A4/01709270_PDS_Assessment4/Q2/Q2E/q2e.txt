@@ -1,0 +1,11 @@
+Python provides native list and dictionary comprehensions as part of the base language. This is a feature R does not have, and can be incredibly useful and powerful. 
+
+Comprehensions can allow for consise and readable constructions of collections, embedding logic directly into the definition, and avoiding verbose code, and errors through multiple loops.
+
+This increases Clarity and reduces boilerplate code drastically, and often makes your code easier to read.
+
+An added advantage, comprehensions are based on Cpython, so in rare scenarios where optimisation is essential and vecorisation is not an option - comprehension is faster than explicit loops.
+
+R can replicate some of this behavior, but it requires using lapply, sapply and table, making the code confusing and verbose - and often loosing the advantage due to needing multiple transformation steps and intermediate objects.
+
+Short code snippits q2e.R and q2e.py highlight the differences, showing that python is cleaner and simpler, and easier to understand.

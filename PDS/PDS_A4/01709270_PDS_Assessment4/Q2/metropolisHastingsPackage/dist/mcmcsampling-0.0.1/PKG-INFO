@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: mcmcsampling
+Version: 0.0.1
+Summary: Metropolis-Hastings sampler.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+
+# MCMCSampling
+
+Minimal Metropolis–Hastings sampler and utilities.
+
+## Contents
+- `MCMCSampling.metropolisHastings`: `MetropolisHastings` class
+- `MCMCSampling.utils`: ASCII trace and histogram utilities

@@ -1,0 +1,20 @@
+R handles missing values (NA) significantly easier and better than Python. We learned about this early on in the module, at week 2. 
+
+In R, missing values are a core language concept, due to the data-intense nature of R's use cases.
+
+R has consistent rules, such as:
+
+- Propagation, i.e NA + 1 and comparisons such as NA > 0 return NA, while Python will opt to return True/False.
+
+- Base functions share a consistent interface to handle/ignore missing values, i.e: sum(x, na.rm = TRUE), mean(x, na.rm = TRUE).
+
+- Base logic to explicitly keep/drop rows using is.na()
+
+Python handles missing values very differently, and significantly worse.
+
+First, Python has many missing value representations, such as None or NaN. 
+
+To add, the behaviour of handling these missing values depends on the library/container used (lists, numpy arrays, pandas series)
+
+It also handles propagation, aggregation with missing values, and filtering rows significantly worse, as examples. These are highlighted in the R and Python scripts, q1e.R and q1e.py
+
