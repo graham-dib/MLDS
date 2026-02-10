@@ -7,6 +7,17 @@ Year 1
 
 Term 1
 
+MATH70094: Programming for Data Science
+
+Module Content:
+
+• Data input and output
+• Data structures
+• Libraries
+• Good programming practice, code and data
+• Profiling
+• Debugging R and Python
+
 MATH70095: Applied Mathematics
 
 Module content:
@@ -22,13 +33,10 @@ Module content:
 • Optimisation
 • Distance Functions
 
-MATH70094: Programming for Data Science
 
-Module Content:
 
-• Data input and output
-• Data structures
-• Libraries
-• Good programming practice, code and data
-• Profiling
-• Debugging R and Python
+Term 2 
+
+MATH70096: Exploratory Data Analysis and Visualisation
+MATH70097: Supervised Learning
+MATH70098: Ethical Machine Learning and Data Science
