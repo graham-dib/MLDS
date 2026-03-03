@@ -1,0 +1,297 @@
+---
+title: "EDA_A1_Q1"
+output: pdf_document
+date: "2026-03-02"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse) #includes ggplot2, dplyr, readr
+library(corrplot)
+library(patchwork)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question 1
+
+### Initial Data Inspection
+
+We choose to follow the 10 point EDA checklist mentioned in Week 2 of the lecture notes to begin our exploration and analysis. It provides a clear starting point to approach our question.
+
+First we formulate the question. We'd like to explore and identify how environmental factors and calendar variables impact bike rental demand, and explore if there are any anomalies or structural irregularities that merit further investigation.
+
+To start, we follow the checklist, read the data and check the packaging.
+
+```{r load-data}
+day_data <- read.csv("day.csv")
+head(day_data)
+summary(day_data)
+```
+
+For ease of use later, we decide to prepare some of the data, converting it to appropriate types and assigning categorical labels for the indicators where possible. Most of these labels were trivial to assign, apart from two we can highlight:
+
+1.  Column "weekday". Values 0 through 6 denote the day of the week, with the initial assumption being 0 would be Monday. On further inspection however, after checking historical dates as well as that realising that both values 0 and 6 are not defined as working days, values 0 through 6 actually correspond to Sunday through Saturday,
+2.  Column "weathersit". Categorical indicators 1 to 4 seem to indicate the severity of the weather, however in the assignment brief it is not specified what this weather type may refer to. Searching for the "Bike Sharing Dataset" brought up the dataset on Kaggle, which provided more clarity into these indicators. As they define a range of weather types, I choose to keep the indicators for my analysis, rather than defining labels.
+
+```{r prepare-data}
+day_data <- day_data %>%
+  mutate(
+    dteday     = as.Date(dteday),
+    season     = factor(season, levels = 1:4,
+                        labels = c("Spring", "Summer", "Autumn", "Winter")),
+    yr         = factor(yr, levels = 0:1, labels = c("2011", "2012")),
+    mnth       = factor(mnth, levels = 1:12),
+    holiday    = factor(holiday, levels = 0:1, labels = c("No", "Yes")),
+    workingday = factor(workingday, levels = 0:1, labels = c("No", "Yes")),
+    weekday    = factor(weekday, levels = 0:6,
+                        labels = c("Sun", "Mon", "Tue", "Wed",
+                                   "Thu", "Fri", "Sat")),
+    weathersit = factor(weathersit, levels = 1:4,
+                        labels = c("1", "2", "3", "4"))
+  )
+
+# "Shake the box" to check dimensions [7]
+nrow(day_data)
+ncol(day_data)
+
+str(day_data)
+head(day_data)
+tail(day_data)
+
+summary(day_data)
+```
+
+After confirming values are as expected, we focus on investigating further. The dataset has no NA/Missing values in 731 observations, and rental counts range from 22 to 8714, a large variability.
+
+### Exploratory analysis of relationships and structures
+
+As we have already confirmed that there is no missing data in our dataset, we proceed with trying to find and identify our relationships, as is the first part of the task.
+
+First, we try to analyse temporal relationships. From inspection and intuition, bike rental would make sense to have temporal relationships, based on season, day of the week and even hour of the day. This makes it an easy place to start.
+
+```{r time-series, fig.height=5}
+ggplot(day_data, aes(x = dteday, y = cnt)) +
+  geom_line(colour = "grey50", linewidth = 0.4) +
+  geom_smooth(method = "loess", span = 0.15, se = FALSE, linewidth = 1) +
+  labs(title = "Daily Bike Rentals Over Time",
+       x = "Date", y = "Total Rentals (cnt)") +
+  theme_minimal()
+```
+
+Our first temporal relationship is clear. There is a clear seasonal cycle, with rental lows in winter and highs in summer, as expected. Secondly, 2012 had more rentals than 2011, suggesting growth in the number of users renting bikes.
+
+```{r monthly-boxplot, fig.height=5}
+ggplot(day_data, aes(x = mnth, y = cnt, fill = season)) +
+  geom_boxplot() +
+  labs(title = "Distribution of Daily Rentals by Month",
+       x = "Month", y = "Total Rentals", fill = "Season") +
+  theme_minimal()
+```
+
+We expand on this analysis by further investigating the seasonal and monthly trends. This confirms the peak season in summer, specifically between June to September. There is also larger variability during the peak season, shown by the interquartile ranges. This highlights that there may be day to day weather changes impacting rental counts, while winter has stable weather that negatively impacts rental counts. Again, this points us to analysing the day-to-day changes.
+
+```{r weekday-plot, fig.height=5}
+ggplot(day_data, aes(x = weekday, y = cnt, fill = workingday)) +
+  geom_boxplot() +
+labs(title = "Rental Demand by Day of the Week",
+       x = "Day", y = "Total Rentals", fill = "Working Day") +
+  theme_minimal()
+
+```
+
+Interestingly, on a day-to-day comparison, the total number of bike rentals doesn't change significantly. Similarly, we can't truly say that a working day has a significant impact on the number of rentals, or vice-versa. However, we might be able to gather information on if this affects the number of casual and registered users.
+
+```{r user-type-weekday, fig.height=5}
+day_long <- day_data %>%
+  pivot_longer(cols = c(casual, registered),
+               names_to = "user_type", values_to = "rentals")
+
+ggplot(day_long, aes(x = weekday, y = rentals, fill = user_type)) +
+  geom_boxplot() +
+  facet_wrap(~ user_type, scales = "free_y") +
+  labs(title = "Casual vs. Registered Rentals by Day of Week",
+       x = "Day", y = "Rentals") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+As suspected, we find that there is a trend. On non-working days, Saturday and Sunday, we find a spike of casual users, and a much lower average of these casual users throughout the working week. Registered users on the other hand have a higher count during working weekdays.
+
+This concludes all temporal trends, so now we move to investigating weather trends.
+
+First we choose to use a correlation matrix to identify fields that have the strongest correlation with a weather indicator and bike usage.
+
+```{r correlation-matrix, fig.height=5}
+numeric_vars <- day_data %>% select(cnt, casual, registered, temp, atemp, hum, windspeed)
+cor_mat <- cor(numeric_vars)
+
+corrplot(cor_mat, method = "color", type = "lower",
+         addCoef.col = "black", number.cex = 0.75,
+         tl.col = "black", tl.cex = 0.85,
+         title = "Correlation Matrix of Continuous Variables",
+         mar = c(0, 0, 2, 0))
+```
+
+We find a couple of potentially important observations.
+
+1.  temp and atemp (temperature and apparent temperature), are very strongly correlated ($r \approx 0.99$). This means one of these fields can be dropped in modelling/further analysis.
+2.  temp (temperature) has a positive correlation with cnt ($r \approx 0.63$)., indicating more bike users on warmer days.
+3.  hum and windspeed have negative correlation with count, at ($r \approx -0.10$) and ($r \approx -.23$) respectively.
+
+Using this, we can investigate these factors further.
+
+```{r temp-scatter, fig.height=5}
+ggplot(day_data, aes(x = temp, y = cnt, colour = season)) +
+  geom_point(alpha = 0.6, size = 1.8) +
+  geom_smooth(aes(group = 1), method = "loess", se = TRUE,
+              colour = "black", linewidth = 1) +
+  labs(title = "Total Rentals vs. Normalised Temperature",
+       x = "Normalised Temperature", y = "Total Rentals",
+       colour = "Season") +
+  theme_minimal()
+```
+
+This provides enough evidence already for our prima facie evidence, following the checklist. Weather impacts rentals, with a non-linear relationship. Past a normalised temperature of approximately 0.7, total rentals starts to decrease. However, we choose to investigate further to see the affects of other weather conditions.
+
+```{r hum-wind-scatter, fig.height=5}
+p1 <- ggplot(day_data, aes(x = hum, y = cnt)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess", se = TRUE) +
+  labs(title = "Rentals vs. Humidity", x = "Normalised Humidity", y = "cnt") +
+  theme_minimal()
+
+p2 <- ggplot(day_data, aes(x = windspeed, y = cnt)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess", se = TRUE) +
+  labs(title = "Rentals vs. Wind Speed", x = "Normalised Wind Speed", y = "cnt") +
+  theme_minimal()
+
+p1 + p2
+```
+
+There is also a relationship between normalised humidity and wind speed, albeit not as strong as temperature. As humidity increases, so does bike usage, echoing temperature-usage relationships, and just like that relationship, past a certain point, excess humidity causes a fall off in usage. For wind-usage relationship, as wind speed increases, bike usage decrease near linearly, as expected.
+
+Finally, to explore the weather relationship further, we investigate how the weather condition labels impact usage.
+
+```{r weathersit-boxplot, fig.height=5}
+ggplot(day_data, aes(x = weathersit, y = cnt, fill = weathersit)) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(title = "Rental Demand by Weather Situation",
+       x = "Weather Category", y = "Total Rentals") +
+  theme_minimal()
+
+```
+
+From the Kaggle Bike Sharing Dataset, we have the following descriptors for "weathersit", the Weather Category indicator:\\
+
+1.  Clear, Few clouds, Partly cloudy, Partly cloudy
+2.  Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+3.  Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+4.  Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+
+As expected, better weather corresponds to more bike usage counts. Interestingly, a weather indicator of category 4 is not present in the dataset.
+
+### Outlier Detection
+
+```{r outlier-detection-1}
+# Modified Z-score using Median Absolute Deviation (MAD)
+med_cnt <- median(day_data$cnt, na.rm = TRUE)
+mad_cnt <- mad(day_data$cnt, na.rm = TRUE, constant = 1)
+day_data <- day_data %>%
+  mutate(
+    mod_z = 0.6745 * (cnt - med_cnt) / mad_cnt,
+    outlier_flag = ifelse(abs(mod_z) > 3, "Outlier", "Normal")
+  )
+
+outliers_cnt <- day_data %>% filter(outlier_flag == "Outlier")
+
+cat("Median:", med_cnt, "| MAD:", mad_cnt, "\n")
+cat("Number of outliers (|Modified Z| > 3):", nrow(outliers_cnt), "\n")
+
+Q1 <- quantile(day_data$cnt, 0.25)
+Q3 <- quantile(day_data$cnt, 0.75)
+IQR_val <- Q3 - Q1
+
+day_data <- day_data %>%
+  mutate(outlier_flag = ifelse(cnt < Q1 - 1.5 * IQR_val | cnt > Q3 + 1.5 * IQR_val,
+                               "Outlier", "Normal"))
+
+outliers_cnt <- day_data %>% filter(outlier_flag == "Outlier")
+cat("Number of outliers:", nrow(outliers_cnt), "\n")
+
+summary(day_data$cnt)
+cat("Q1:", quantile(day_data$cnt, 0.25), "\n")
+cat("Q3:", quantile(day_data$cnt, 0.75), "\n")
+cat("IQR:", IQR(day_data$cnt), "\n")
+cat("Lower fence:", quantile(day_data$cnt, 0.25) - 1.5 * IQR(day_data$cnt), "\n")
+cat("Upper fence:", quantile(day_data$cnt, 0.75) + 1.5 * IQR(day_data$cnt), "\n")
+cat("Min:", min(day_data$cnt), "| Max:", max(day_data$cnt), "\n")
+```
+
+Using trial and error with various different statistical outlier flags, we cannot find any outliers. In a large dataset such as this, it seems unlikely. Further investigation shows that a minimum count of 22 is anomalous compared to a median of 4548, but the distribution is too wide to catch the outliers. We choose a simple domain based approach instead, flagging values that are 15% of the median as outliers to be explored.
+
+```{r outlier-detection-2}
+threshold <- 0.15 * median(day_data$cnt)  # 15% of median
+
+day_data <- day_data %>%
+  mutate(outlier_flag = ifelse(cnt < threshold, "Outlier", "Normal"))
+
+outliers_cnt <- day_data %>% filter(outlier_flag == "Outlier")
+cat("Threshold:", round(threshold), "\n")
+cat("Number of outliers:", nrow(outliers_cnt), "\n")
+```
+
+We now plot this to contextualise and check our outliers.
+
+```{r outlier-graph}
+ggplot(day_data, aes(x = temp, y = cnt, colour = outlier_flag)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_hline(yintercept = threshold, linetype = "dashed", colour = "red") +
+  scale_colour_manual(values = c("Normal" = "grey70", "Outlier" = "red")) +
+  labs(title = "Outliers in Context: Temperature vs. Rentals",
+       x = "Normalised Temperature", y = "Total Rentals",
+       colour = "") +
+  theme_minimal()
+```
+
+We find that the outliers are on the lower side of no. of rentals. It may be interesting to investigate these specific dates, as they may align with specific events.
+
+```{r outlier-table}
+threshold <- 0.15 * median(day_data$cnt)
+
+day_data %>%
+  filter(cnt < threshold) %>%
+  select(dteday, cnt, season, weathersit, temp, atemp, hum, windspeed, holiday, workingday) %>%
+  arrange(dteday)
+```
+
+From looking online, I see that this dataset seems to originate from the Capital bikeshare system in Washington DC.
+
+After searching, I find that many of these outliers respond to events, weather warnings, or data entry errors. These are highlighted below.
+
+1.  **2011-01-26 (cnt = 506):** Major snowstorm ("Carmageddon") hit DC, causing severe weather conditions.
+2.  **2011-01-27 (cnt = 431):** Aftermath of the Carmageddon snowstorm, with road closures and disruption still ongoing.
+3.  **2011-03-06 (cnt = 605):** Humidity recorded at 0.95 (near-maximum), indicating a day of very heavy rainfall.
+4.  **2011-03-10 (cnt = 623):** Severe thunderstorms with confirmed tornadoes in the DC metro area (Bealeton and Chantilly, Virginia). Additionally, humidity is recorded as exactly 0, which is almost certainly a data recording error.
+5.  **2011-10-29 (cnt = 627):** Halloween Nor'easter ("Snowtober") produced unusually early snowfall across the Northeast, breaking records in at least 20 cities.
+6.  **2012-10-29 (cnt = 22):** Hurricane Sandy struck the East Coast. The federal government closed on October 29--30, with over 5 inches of rain and 55--65 mph wind gusts in DC. This explains the lowest value in the entire dataset.
+7.  **2012-12-26 (cnt = 441):** Day after Christmas — low demand likely due to the holiday period rather than weather.
+
+Interestingly, these outliers with reported severe weather are not labeled with the categorical indicator 4 - which would indicate severe weather. This seems like a data mistake.
+
+### Anomalies and Irregular Structure
+
+Finally, we approach the last part of Q1, investigating irregular structure or anomalies.
+
+We have already identified various anomalies and irregular structures, such as the temp and atemp collinearity, the outliers and errors in the dataset.
+
+However, we have not investigated if the year-on-year growth is an impact of seasonality, or true systematic growth.
+
+```{r year-growth, fig.height=5}
+ggplot(day_data, aes(x = mnth, y = cnt, fill = yr)) +
+  geom_boxplot() +
+  labs(title = "Year-on-Year Comparison of Monthly Rentals",
+       x = "Month", y = "Total Rentals", fill = "Year") +
+  theme_minimal()
+```
+
+Clearly, seasonality remains stable across the years, showing that this is systematic growth, rather than a seasonal byproduct.
