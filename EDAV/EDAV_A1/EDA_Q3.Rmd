@@ -1,0 +1,213 @@
+---
+title: "EDA_Q3"
+output: pdf_document
+date: "2026-03-02"
+---
+
+# Question 3
+
+```{r setup, include=FALSE}
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Start - Simulation
+
+We first begin by using the starter code to simulate the baseline model.
+
+```{r simulation-start}
+# ###########################################################
+# EDAV Coursework 1: Question 3 starter code ( R )
+# ###########################################################
+
+set.seed(270)
+n <- 1000
+
+x <- rnorm(n, mean = 0, sd = 1)
+
+eta <- -0.5 + 1.2 * x
+p <- plogis(eta)
+
+y <- rbinom(n, size = 1, prob = p)
+
+df <- data.frame(y = y, x = x)
+
+fit <- glm(y ~ x, data = df, family = binomial(link = "logit"))
+
+phat <- predict(fit, newdata = df, type = "response")
+```
+
+## Alternative Representation
+
+### Fixed-width discretisation
+
+Replace each observed value of x by the midpoint of the fixed-width interval in which it falls. (For example, this could be achieved by partitioning the range of x into equal-width bins and mapping each observation to its bin midpoint.)
+
+We seat 10 equal-width bins across the observed range of x. This gives us 100 bins in each observation and should be enough coarsening to create a visible grouping while keeping the relationship useful and usable.
+
+If we were to choose more bins across the observed range, such as between 50-100, we lead to discretised values that nearly equal the original value. As such the model converges to the original, and we are not accomplishing anything with our alternative representation.
+
+If we were to choose less bins, e.g. \<5, we'd aggressively coarsen the predictor. This would impose a structural change onto the distribution, leading to highly predicted probabilities being clustered, tail behavior compressing, and the regression behaviour being that of modelling a categorical variable with a few levels.
+
+We also choose to store these in the same dataframe, for row alignment, compatibility and ease of use later on.
+
+```{r fixed-width-discretisation}
+
+K <- 10
+breaks <- seq(min(df$x), max(df$x), length.out = K + 1)
+
+df <- df %>%
+  mutate(
+    x_bin = cut(x, breaks = breaks, include.lowest = TRUE),
+    # map each bin to its midpoint
+    x_disc = {
+      mids <- (head(breaks, -1) + tail(breaks, -1)) / 2
+      mids[as.integer(x_bin)]
+    }
+  )
+
+head(df)
+```
+
+### Jittered representation
+
+Replace each observed value of x by a jittered version obtained by adding a small amount of random noise.
+
+We choose the same seed as initialising. Again, we add the representations to our df. Jitter() could've been used here, but this has better clarity.
+
+We choose sigma = 0.1, which implies Var(noise) = 0.01.
+
+This shifts the total variance to 1.01, allowing a slight shock, and not structural distortion to the distribution. A large shock, such as 0.5, would lead to refitting under the error instead of sensitivity testing. A smaller shock, such as 0.01, would be insignificant and so distributions would be indistinguishable.
+
+This is a realistic small measuring of random noise.
+
+```{r jittered-discretisation}
+
+set.seed(270)
+sigma <- 0.1
+df <- df %>%
+  mutate(x_jit = x + rnorm(n(), mean = 0, sd = sigma))
+
+head(df)
+
+```
+
+We now proceed to refit the models, and pass our predictions.
+
+```{r refit}
+fit_orig <- glm(y ~ x,      data = df, family = binomial(link = "logit"))
+fit_disc <- glm(y ~ x_disc, data = df, family = binomial(link = "logit"))
+fit_jit  <- glm(y ~ x_jit,  data = df, family = binomial(link = "logit"))
+
+df <- df %>%
+  mutate(
+    phat_orig = predict(fit_orig, type = "response"),
+    phat_disc = predict(fit_disc, type = "response"),
+    phat_jit  = predict(fit_jit,  type = "response")
+  )
+```
+
+We also convert the data from wide to long data. This allows us to store the data in a visualisation friendly way, as advised in the course reading materials.
+
+```{r tidy-long}
+phat_long <- df %>%
+  select(phat_orig, phat_disc, phat_jit) %>%
+  pivot_longer(everything(),
+               names_to = "representation",
+               values_to = "probability") %>%
+  mutate(representation = recode(representation,
+                                phat_orig = "Original",
+                                phat_disc = "Discretised (midpoints)",
+                                phat_jit  = paste0("Jittered (sd=", sigma, ")")))
+
+```
+
+## Exploratory Comparisons
+
+We proceed by conducting EDA and creating three simple charts/metrics to compare the distributions across, Histograms, Density estimates and QQ Plots.
+
+### Histograms
+
+When creating our histograms, we have the tuning choice of number of bins. Our predicted probabilities lie within [0,1] We'd like to pick our bin width large enough to avoid extreme sampling noise (bins are too thin, so histogram strips have random spikes due to noise). On the flip side, we'd like bin width small enough to avoid structural differences being absorbed into the bin width - loosing the effect of shocking the distributions.
+
+Here we choose 30, a commonly chosen bin width for a sample size of n = 1000.
+
+This leads to a bin width of 1/30 or approx 0.033, and each bin contains on average 1000/30 observations, or approx 33 observations.
+
+```{r histogram}
+ggplot(phat_long, aes(x = probability)) +
+  geom_histogram(bins = 30, colour = "white") +
+  facet_wrap(~ representation, nrow = 1) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(title = "Predicted probability distributions (histograms)",
+       x = "Predicted probability", y = "Count")
+
+```
+
+### Density Estimates
+
+We also have a tuning parameter here, that of the bandwidth in the kernel density estimate equation. This controls how smoothed the distribution is. A small bandwidth leads to low smoothing, and thus a jagged distribution and a increased variance of the estimate(as sampling noise is more visible).
+
+A large bandwidth leads to smoothing over bumps, reducing structure in the distribution and hiding representations. You reduce variance in the estimate at the cost of bias in the estimate.
+
+In this scenario we do not choose the bandwidth parameter, but let ggplot2 choose the bandwidth automatically.
+
+```{r density-estimates}
+
+ggplot(phat_long, aes(x = probability, colour = representation)) +
+  geom_density(linewidth = 1) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(title = "Predicted probability distributions (kernel density)",
+       x = "Predicted probability", y = "Density")
+
+```
+
+### QQ Plots
+
+We choose to perform QQ plots of both the Discretised and Jittered vs the Original. This allows us to look for deviations in tails, or symmetric skews introduced by the changes.
+
+```{r QQ Plots}
+
+qq_df <- function(a, b, n = 1000) {
+  tibble(
+    q_a = quantile(a, probs = seq(0, 1, length.out = n), names = FALSE),
+    q_b = quantile(b, probs = seq(0, 1, length.out = n), names = FALSE)
+  )
+}
+
+qq_disc <- qq_df(df$phat_orig, df$phat_disc) %>%
+  mutate(comparison = "Discretised vs Original")
+
+qq_jit <- qq_df(df$phat_orig, df$phat_jit) %>%
+  mutate(comparison = "Jittered vs Original")
+
+qq_long <- bind_rows(qq_disc, qq_jit)
+
+ggplot(qq_long, aes(x = q_a, y = q_b)) +
+  geom_point(alpha = 0.35) +
+  geom_abline(intercept = 0, slope = 1) +
+  facet_wrap(~ comparison, nrow = 1) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(title = "QQ plots of predicted probabilities",
+       x = "Original quantiles", y = "Perturbed quantiles")
+```
+
+### Discussions & Interpretations
+
+Our discretised representation shows interesting results. Firstly, we have visible step like clustering in our probabilities, as seen from the histogram. To add, the histogram also shows a compression of the tails, indicating that the extreme probabilities have been pulled towards the center. The Density Estimates and QQ plots show the same, with x values collapsing to the midpoints and showing visible groupings.
+
+From this we can infer that our distribution is sensitive to information loss through coarsening. The large scale groupings, and mild tail compression shows that although the groupings may be useful predictors, it can lead to information loss.
+
+Our jitter representation shows something different entirely. Our historam and density estimate is almost identical, and our QQ plots show a 45 degree line, indicating to us that downstream outputs are robust to small random pertubations of x. As our distribution barely moved, the probabilities are stable and insensitive to noise.
+
+What we cannot conclude from this analysis is which representation is better, as we did not compute any performance criterion. We can only describe the properties. Similarly, we cannot say that discretisation harms prediction or jitter improves robustness, as we did not evaluate an error rate or any performance.
+
+To add, this analysis was very selective and based on a specific n, logit structure, bin count and jitter. As a result we cannot generalise to many different configurations, as the sensitivity analysis was produced only under these (reasonable) conditions.
+
+We also have other limitations of the visuals selected.
+
+Histograms for example depend strongly on the chosen number of bins. Our selection allowed aggregates into groups for our discretisation, but many bins would've resulted in a similar result to our jittered representation, hiding our takeaways. Similarly, Less bins would have meant a larger sensitivity to random noise, and could exaggerate differences.
+
+Likewise, density estimates are based on our bandwith term. Too much smoothing could've masked the large peaks/troughs we saw during our discretisation.
+
+QQ plots are effective for detecting distributional shifts, especially in tails - as seen in our discretisation, but are not an apt comparison for comparing all three representations simultaneously: original vs discretised vs jittered.
