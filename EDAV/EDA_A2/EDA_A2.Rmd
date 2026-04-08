@@ -1,0 +1,337 @@
+---
+title: "EDA_A2"
+output: html_document
+---
+
+# EDA Assessment
+
+## Assessment brief preamble instructions and prep
+
+#### Setup and library loading
+
+We focus on using relevant libraries explicitly mentioned in the course material.
+
+```{r}
+
+library(kableExtra)
+library(tidyverse)
+library(naniar)
+library(corrplot)
+library(factoextra)
+library(GGally)
+
+```
+
+#### Sampling Protocol
+
+We proceed with following the sampling protocol specified in the assessment brief:
+
+-   Loading the dataset
+
+-   Setting the random seed to the last three digits of our college ID
+
+-   Sampling 600 rows without replacement
+
+-   Then proceeding the conduct the analysis with the sampled dataset
+
+```{r}
+
+chromo_data <- read.csv("chromosome_data.csv")
+
+set.seed(270)
+
+chromo <- chromo_data[sample(nrow(chromo_data), size = 600, replace = FALSE), ]
+
+rownames(chromo) <- NULL #reset the row indices to reduce confusion within our sampled set
+head(chromo)
+```
+
+## Question 1 - Exploratory Data Analysis
+
+### Initial Inspection: Reporting the dimensions of the data and summarising variable scales.
+
+We proceed to Q1, first reporting the dimensions of the data, and summarising the variable scales according to the assessment brief.
+
+#### Brief data peak before starting
+
+```{r}
+head(chromo, 5)
+tail(chromo, 5)
+```
+
+Data appears to be sampled correctly and is without obvious formatting errors.
+
+#### Dimensions and variable types.
+
+```{r}
+cat("Sampled dataset dimensions:", nrow(chromo), "rows x", ncol(chromo), "columns\n")
+str(chromo, list.len = 35)
+```
+
+We find that all variables, V1 to V33, are numeric. No categorical or character columns are present. This is consistent with the assessment brief's framing, specifying that the data is quantitative features representing chromosome size, shape and banding patterns. nrows() and ncols() also verify that our dataset has the correct dimensions.
+
+#### Summary Statistics (Variable Scales)
+
+```{r}
+
+summary(chromo)
+```
+
+```{r scale-range-table}
+
+scale_tbl <- chromo %>%
+  summarise(across(everything(), list(
+    min    = ~min(., na.rm = TRUE),
+    max    = ~max(., na.rm = TRUE),
+    range  = ~diff(range(., na.rm = TRUE)),
+    mean   = ~mean(., na.rm = TRUE),
+    sd     = ~sd(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE)
+  ), .names = "{.col}__{.fn}")) %>%
+  pivot_longer(everything(),
+               names_to  = c("variable", "stat"),
+               names_sep = "__") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  arrange(as.integer(str_remove(variable, "V")))
+
+
+#kableExtra used here for styling as I was having an error with black text on a dark mode theme and CSS styling options were unable to fix with my editor (unsure why)
+knitr::kable(scale_tbl, digits = 2, format = "html",
+             caption = "Per-variable summary statistics, sorted by variable name") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+Our summary statistics, and the above knitted table reveal one particularly significant results across our variable scale. Variables V1 to V28 have ranges that span hundreds, indicating that these values may be size related features, while variables V29 to V33 are confined to single-digit intervals, which may be the banding ratio features specified in the framing of our assessment brief. This heterogeneity could affect our analysis later, as any distance based method (such as PCA, k-means clustering), will be dominated by the large variance. This will require us to standardise our data later.
+
+### Quantify and Visualise missingness
+
+Missing data can complicate clustering, so we proceed to try diagnose missingness, and make a decision on whether this should be imputed or not.
+
+#### Quantification of missingness
+
+```{r}
+miss_summary <- miss_var_summary(chromo)
+knitr::kable(miss_summary, digits = 2,
+            caption = "Missing values per variable (sorted by percentage missing)") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+```{r}
+ggplot(miss_summary, aes(x = reorder(variable, -pct_miss), y = pct_miss)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Percentage of Missing Values per Variable",
+       x = "Variable", y = "% Missing") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Across the board, all variables but one have missing values (that of V23). However, the percentage of missing values is less than 2% across all variables. This is promising and may suggest that we do not have to impute any missing values.
+
+We proceed to visualise missingness further, in order to analyse any patterns within our dataset and make a final verdict on imputing missing values.
+
+#### Overall missingness map
+
+```{r}
+vis_miss(chromo, sort_miss = TRUE) +
+  labs(title = "Missingness Map (rows × variables)")
+```
+
+The missingness map provides an overview of every cell in the dataset. It confirms that our missingness is low, at 0.5% overall. It also shows us the concentration of missingness, which in this case does not seem to follow an obvious pattern. The lines, indicating missingness, seem to be randomly distributed both across observations (rows) and variables. No variable is disproportionately affected, and there is no row-level systematic pattern.
+
+Given the tiny proportion of missing values, and the random concentration, imputing missing values would likely introduce small bias using simple methods such as mean/median imputation. More complex methods also appear unnecessary here.
+
+#### Co-missingness patterns
+
+```{r}
+n_vars_with_miss <- sum(miss_summary$n_miss > 0)
+gg_miss_upset(chromo, nsets = min(n_vars_with_miss, 10))
+```
+
+Our intersection plot shows that most missingness is unique. There is very little co-missingness, that of three connected dots in our graph, showing intersection sizes of one. This appears negligible to our future analysis.
+
+Missingness does not appear monotone, as missing values are spread across variables without consistent pairing.
+
+There also does not seem to be any evidence of a pipeline failure, as there are no large intersection bars with multiple missing variables.
+
+#### Missing values by observation
+
+```{r}
+obs_miss <- chromo %>%
+  mutate(row_id = row_number(),
+         n_miss = rowSums(is.na(.))) %>%
+  select(row_id, n_miss)
+
+ggplot(obs_miss, aes(x = n_miss)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Missing Values per Observation",
+       x = "Number of Missing Variables", y = "Count of Observations") +
+  theme_minimal()
+
+
+```
+
+The vast majority of rows, 500+ out of 600 do not exhibit missing values. Single value missingness is then most common, and there is a max of 2 values missing per observation.
+
+##### Due to the above analysis, I see no reason to impute missing values. Missingness appears randomly scattered, and there are no patterns of concern within variables, observations or co-missingness.
+
+### Structure analysis
+
+As our data has 33 variables, bivariate plots are insufficient. We use dimension reduction methods to inspect the structure of our data.
+
+#### Correlation analysis
+
+```{r miss-corr, fig.width=18, fig.height=18}
+chromo_na_dropped <- chromo %>% drop_na()
+cat("Complete cases available:", nrow(chromo_na_dropped), "of", nrow(chromo), "\n")
+
+cor_mat <- cor(chromo_na_dropped)
+
+corrplot(cor_mat,
+         method   = "color",
+         type     = "upper",
+         order    = "hclust",      # cluster correlated variables together
+         tl.cex   = 1.5,
+         cl.cex = 1.5,
+         tl.col   = "black",
+         addCoef.col = "black",
+         number.cex = 1,
+         mar      = c(0, 0, 2, 0))
+
+title("Correlation Matrix (hierarchically clustered)", 
+      cex.main = 3,    
+      font.main = 2,  
+      line = 1)          
+```
+
+Our correlation plot seems to indicate two main clusters. We can see two strongly correlated groups, at the top left of the correlation plot, and bottom right. These groups are those of:
+
+-   V6, V7, V10, V16, V8, V1, V13, V19 and neighbours
+
+-   V5, V9, V21, V25, V23, V3, V18, V12, V22 and neighbours
+
+Many of the pairwise correlations between these clusters have values in the range of 0.4 - 0.8, and in some cases higher. This indicates that the variables could be measuring related or overlapping features.
+
+In the top right of the correlation plot, you can see strong negative correlations. After further inspection, it seems that this negative correlation is actually between the intersection of the two clusters, indicating that the features are measuring opposing or complementary signals. For example, chromosomes have two arms, designated a long arm and short arm. These opposing signals may be measuring features of each arm, such as length, leading to a negative correlation between the clusters.
+
+There is a cluster of variables in the middle of the plot with close to zero correlation, indicating that these variables may carry independent information not captured by the two dominant groups.
+
+Overall, it seems that dimensionality reduction, such as PCA would be effective here, as we may be able to capture the variance within these clusters with a reduced amount of variables, due to the strong correlation.
+
+#### Principal Components Analysis
+
+We perform PCA on the scaled (unit-variance, zero-mean) data with missing values dropped. This ensures that all variables can contribute equally to the decomposition. As PCA uses euclidean distance, if the range of variable x has range 500, and y has range 5, then variable x will dominate our analysis regardless of if the variable is actually more informative. As a result, we must scale the data to ensure there is no implicit weighting. We also drop NA values as PCA requires a complete covariance matrix, and as discussed earlier, we do not have a strong justification to impute NA values in this scenario.
+
+```{r}
+pca_result <- prcomp(chromo_na_dropped, center = TRUE, scale. = TRUE)
+```
+
+#### Scree plot and Cumulative variance explained plot
+
+We continue with a scree plot, to see the proportion of total variance captured by each successive principle component. As well as this, we use a cumulative variance explained graph to further explain which principle components to select.
+
+```{r}
+fviz_eig(pca_result,
+         addlabels = TRUE,
+         ylim = c(0, 40),
+         barfill = "steelblue",
+         barcolor = "black",
+         main = "Scree Plot: Variance Explained by Principal Components")
+```
+
+```{r}
+cum_var <- cumsum(pca_result$sdev^2 / sum(pca_result$sdev^2)) * 100
+var_df <- data.frame(PC = seq_along(cum_var), CumulativeVariance = cum_var)
+
+ggplot(var_df, aes(x = PC, y = CumulativeVariance)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 2) +
+  geom_hline(yintercept = c(70, 80, 90), linetype = "dashed", colour = "grey50") +
+  labs(title = "Cumulative Variance Explained",
+       x = "Number of Principal Components",
+       y = "Cumulative % Variance") +
+  theme_minimal()
+```
+
+From these two graphs, we have a number of key observations about how we may proceed with clustering.
+
+-   PC1 is dominant - PC1 captures 37.7% of the variation within the data, confirming the strong correlation clusters we found earlier.
+
+-   PC3 Elbow - There is an elbow after PC3 in our scree plot, indicating that PC1 - PC3 captures most of the variation within the data. After PC3, each successive principle component only adds roughly 3% of the variation, which could be structural or could be noise.
+
+-   Cumulative Variance - To reach an 80% threshold of variance captured within the data, we need 10 principle components. This indicates that there are multiple sources of variation beyond the two clusters we found earlier in the correlation matrix.
+
+```{r}
+cat("PCs to reach 60% variance:", which(cum_var >= 60)[1], "\n")
+cat("PCs to reach 70% variance:", which(cum_var >= 70)[1], "\n")
+cat("PCs to reach 80% variance:", which(cum_var >= 80)[1], "\n")
+cat("PCs to reach 90% variance:", which(cum_var >= 90)[1], "\n")
+```
+
+Although to reach a larger cumulative variance amount we may need 10+ clusters, for analytical purposes we may be able to get away with 3-7 clusters in practice. This seems to retain the dominant biological structure of the chromosomes without over-fitting for noise.
+
+#### Score scatterplot 
+
+We use score scatterplots (Plotting PC1 against PC2) as further graphical evidence for cluster structure.
+
+```{r}
+fviz_pca_ind(pca_result,
+             geom.ind = "point",
+             col.ind  = "cos2",         
+             gradient.cols = c("blue", "orange", "red"),
+             pointsize = 1.5,
+             title = "PCA – Observations Projected onto PC1 vs PC2")
+```
+
+PC1 shows a clear horizontal spread, indicating that PC1 is discriminating between our observations strongly, and capturing structures within the data.
+
+PC2 shows vertical spread, albeit not as strongly as PC1. However, it still suggests being able to capture a second independent source of variation.
+
+The clusters do not form distinct groups, rather they form a continuous circular pattern, indicating the chromosome measurements vary continuously, and do not seem to fall into distinct groups.
+
+Observations with a high cos2, shown in red and orange sit mainly at the extremes of PC1. As this metric represents how well a particular observation is represented in the reduced PCA space, this means PC1 clearly defines these observations.
+
+On the other end, we have a cluster of observations towards the centre of the graph with low cos2 values. This indicates that these observations are poorly explained by PC1 and PC2, and their variation may be better explained in PC3 and beyond. We proceed to plot PC3 and PC4 to further explore these structures.
+
+```{r}
+pca_scores <- as.data.frame(pca_result$x)
+
+ggplot(pca_scores, aes(x = PC3, y = PC4)) +
+  geom_point(alpha = 0.5, size = 1.5, colour = "steelblue") +
+  labs(title = "PCA – Observations Projected onto PC3 vs PC4",
+       x = "PC3", y = "PC4") +
+  theme_minimal()
+```
+
+Our plot of PC3 vs PC4 is structureless, with no seeming directional spread or grouping. This indicates that PC3 and beyond are capturing minor sources of variation that do not have an obvious structure.
+
+This seems to validate the initial scree plot, which suggested that only PC1 to PC3 were worth retaining.
+
+#### PCA Loadings
+
+Analysing the PCA loadings can suggest to us which variables drive each principal components. Variables with near-zero loadings on PC1-PC3 can suggest little contribution to the structure of our data, and to discriminatory information. These can be candidates for removal. Similarly, variables with large loadings can suggest the largest drivers to our principle components.
+
+```{r}
+fviz_contrib(pca_result, choice = "var", axes = 1,
+             title = "Variable Contributions to PC1", top = 33)
+fviz_contrib(pca_result, choice = "var", axes = 2,
+             title = "Variable Contributions to PC2", top = 33)
+```
+
+```{r}
+loadings_PC5 <- as.data.frame(pca_result$rotation[, 1:5])
+loadings_PC5$variable <- rownames(loadings_PC5)
+loadings_PC5 <- loadings_PC5 %>% select(variable, everything())
+
+knitr::kable(loadings_PC5, digits = 3,
+             caption = "PCA loadings for the first five components") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
