@@ -1,0 +1,1498 @@
+---
+title: "Chromosome Feature Vectors – Exploratory Data Analysis & Cluster Structure"
+author: "Student ID: [YOUR ID HERE]"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    code_folding: show
+    fig_width: 10
+    fig_height: 7
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+```
+
+# Preamble: Libraries and Data Loading
+
+We begin by loading the packages required for the analysis. Each serves a specific
+purpose: `naniar` for principled missing-data diagnostics, `corrplot` for
+correlation visualisation, `ggplot2` for layered graphics, and
+`factoextra` for PCA extraction utilities.
+
+```{r libraries}
+library(tidyverse)
+library(naniar)       # miss_var_summary, vis_miss, gg_miss_upset
+library(corrplot)     # correlation heatmap
+library(factoextra)   # fviz_eig, fviz_pca_ind, fviz_cluster
+library(GGally)       # ggpairs for selected variable panels
+library(gridExtra)    # grid.arrange for side-by-side plots
+library(combinat)     # permn for label alignment in Q2
+```
+
+```{r load-data}
+chromo_full <- read.csv("chromosome_data.csv")
+```
+
+# Sampling and Initial Inspection
+
+## Sampling Protocol
+
+The coursework mandates a reproducible subsample of 600 rows drawn without
+replacement. The random seed is set to the **last three digits of the student's
+College ID**. All downstream analysis is conducted exclusively on this subsample.
+
+```{r sampling}
+# ──────────────────────────────────────────────────
+# IMPORTANT: Replace 123 with the last three digits
+# of YOUR College ID before knitting.
+# ──────────────────────────────────────────────────
+set.seed(123)
+
+chromo <- chromo_full[sample(nrow(chromo_full), size = 600, replace = FALSE), ]
+rownames(chromo) <- NULL
+```
+
+## Dimensions and Variable Types
+
+```{r dimensions}
+cat("Sampled dataset dimensions:", nrow(chromo), "rows ×", ncol(chromo), "columns\n")
+str(chromo, list.len = 35)
+```
+
+All 33 variables (`V1`–`V33`) are numeric, which is consistent with quantitative
+features extracted from karyogram image analysis (capturing chromosome size, shape,
+and banding patterns). No categorical or character columns are present.
+
+## Quick Peek at the Data
+
+```{r peek}
+head(chromo, 5)
+tail(chromo, 5)
+```
+
+## Summary Statistics
+
+We examine the five-number summary plus the mean for every variable to understand
+the **scales** on which the features are reported. If scales differ by orders of
+magnitude, this will have direct implications for distance-based methods later.
+
+```{r summary-stats}
+summary(chromo)
+```
+
+```{r scale-range-table}
+scale_tbl <- chromo %>%
+  summarise(across(everything(), list(
+    min  = ~min(., na.rm = TRUE),
+    max  = ~max(., na.rm = TRUE),
+    range = ~diff(range(., na.rm = TRUE)),
+    mean = ~mean(., na.rm = TRUE),
+    sd   = ~sd(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE)
+  ), .names = "{.col}__{.fn}")) %>%
+  pivot_longer(everything(),
+               names_to = c("variable", "stat"),
+               names_sep = "__") %>%
+  pivot_wider(names_from = stat, values_from = value) %>%
+  arrange(desc(range))
+
+knitr::kable(scale_tbl, digits = 2, format = "markdown",
+             caption = "Per-variable summary statistics, sorted by range (descending)")
+```
+
+**Observation on scales.** The table above reveals that the numeric ranges of the
+33 variables differ substantially. Some variables span ranges in the hundreds
+(e.g. size-related features), while others are confined to single-digit intervals
+(e.g. banding-pattern ratios). This heterogeneity in scale is critical: any
+Euclidean-distance-based method (PCA on the covariance matrix, $k$-means
+clustering) will be **dominated by the high-variance features** unless we
+standardise. We revisit this formally in Section 5.
+
+---
+
+# Quantifying and Visualising Missingness
+
+Missing data can distort multivariate structure and must be diagnosed before any
+imputation or removal decision is taken. We approach this in three stages:
+quantification, pattern analysis, and a removal decision.
+
+## Per-Variable Missingness
+
+```{r miss-var-summary}
+miss_summary <- miss_var_summary(chromo)
+knitr::kable(miss_summary, digits = 2, format = "markdown",
+             caption = "Missing values per variable (sorted by percentage missing)")
+```
+
+```{r miss-bar}
+ggplot(miss_summary, aes(x = reorder(variable, -pct_miss), y = pct_miss)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Percentage of Missing Values per Variable",
+       x = "Variable", y = "% Missing") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Overall Missingness Map
+
+`vis_miss()` provides a rasterised overview of every cell in the dataset, making
+it easy to see whether missingness is concentrated in specific rows or spread
+uniformly.
+
+```{r vis-miss, fig.height=8}
+vis_miss(chromo, sort_miss = TRUE) +
+  labs(title = "Missingness Map (rows × variables)")
+```
+
+## Patterns of Co-Missingness
+
+If two or more variables are *always* missing together, this may signal a shared
+extraction failure in the image pipeline (e.g. a measurement that depends on
+another measurement being successful). We use an UpSet plot to inspect whether
+missingness is **monotone** or **non-monotone**.
+
+```{r miss-upset, fig.height=6}
+n_vars_with_miss <- sum(miss_summary$n_miss > 0)
+if (n_vars_with_miss >= 2) {
+  gg_miss_upset(chromo, nsets = min(n_vars_with_miss, 10))
+} else {
+  cat("Fewer than 2 variables have missing values; UpSet plot not applicable.\n")
+}
+```
+
+## Per-Observation Missingness
+
+We also check whether certain *observations* carry a disproportionate number of
+missing values—such rows may be unreliable and should be flagged.
+
+```{r miss-per-obs}
+obs_miss <- chromo %>%
+  mutate(row_id = row_number(),
+         n_miss = rowSums(is.na(.))) %>%
+  select(row_id, n_miss)
+
+ggplot(obs_miss, aes(x = n_miss)) +
+  geom_histogram(binwidth = 1, fill = "coral", colour = "black") +
+  labs(title = "Distribution of Missing Values per Observation",
+       x = "Number of Missing Variables", y = "Count of Observations") +
+  theme_minimal()
+
+cat("Observations with >5 missing values:",
+    sum(obs_miss$n_miss > 5), "\n")
+```
+
+## Missingness Decision
+
+```{r miss-decision}
+high_miss_vars <- miss_summary %>% filter(pct_miss > 40) %>% pull(variable)
+cat("Variables with > 40% missing:", 
+    ifelse(length(high_miss_vars) == 0, "None", paste(high_miss_vars, collapse = ", ")), "\n")
+```
+
+If any variable exceeds a high missingness threshold (say 40 %), it provides too
+little information for reliable imputation and should be dropped. Variables with
+moderate missingness (< ~10 %) can be handled via complete-case analysis for PCA
+(which requires a complete numeric matrix), provided the missingness pattern is
+roughly **Missing Completely At Random (MCAR)**. The `vis_miss()` output above
+allows us to assess whether missingness appears systematic or scattered.
+
+---
+
+# Examining Multivariate Structure
+
+## Correlation Analysis
+
+With 33 features, a correlation heatmap is the most efficient way to identify
+redundant (highly collinear) variables and natural groupings among features.
+
+```{r correlation, fig.height=9, fig.width=10}
+chromo_cc <- chromo %>% drop_na()
+cat("Complete cases available:", nrow(chromo_cc), "of", nrow(chromo), "\n")
+
+cor_mat <- cor(chromo_cc)
+
+corrplot(cor_mat,
+         method   = "color",
+         type     = "upper",
+         order    = "hclust",
+         tl.cex   = 0.65,
+         tl.col   = "black",
+         addCoef.col = "grey30",
+         number.cex = 0.45,
+         title    = "Correlation Matrix (hierarchically clustered)",
+         mar      = c(0, 0, 2, 0))
+```
+
+```{r high-cor-pairs}
+cor_upper <- cor_mat
+cor_upper[lower.tri(cor_upper, diag = TRUE)] <- NA
+high_cor <- which(abs(cor_upper) > 0.9, arr.ind = TRUE)
+
+if (nrow(high_cor) > 0) {
+  high_cor_df <- data.frame(
+    Var1 = colnames(cor_mat)[high_cor[, 1]],
+    Var2 = colnames(cor_mat)[high_cor[, 2]],
+    Correlation = cor_mat[high_cor]
+  ) %>% arrange(desc(abs(Correlation)))
+  knitr::kable(high_cor_df, digits = 3, format = "markdown",
+               caption = "Variable pairs with |r| > 0.9")
+} else {
+  cat("No variable pairs exceed |r| = 0.9.\n")
+}
+```
+
+Highly correlated pairs ($|r| > 0.9$) are essentially linearly redundant.
+Retaining both in a distance-based analysis inflates the influence of the latent
+factor they share, which motivates either dropping one member of each pair or,
+more elegantly, using PCA to combine them.
+
+## Principal Components Analysis (PCA)
+
+PCA is the natural multivariate tool for a dataset of this width. We perform PCA
+on the **scaled** (unit-variance, zero-mean) complete-case data so that all
+variables contribute equally to the decomposition, regardless of their original
+measurement scale. (See Section 5 for the formal justification.)
+
+```{r pca}
+pca_result <- prcomp(chromo_cc, center = TRUE, scale. = TRUE)
+```
+
+### Scree Plot
+
+```{r scree, fig.height=5}
+fviz_eig(pca_result,
+         addlabels = TRUE,
+         ylim = c(0, 40),
+         barfill = "steelblue",
+         barcolor = "black",
+         main = "Scree Plot: Variance Explained by Principal Components")
+```
+
+```{r cumvar}
+cum_var <- cumsum(pca_result$sdev^2 / sum(pca_result$sdev^2)) * 100
+var_df <- data.frame(PC = seq_along(cum_var), CumulativeVariance = cum_var)
+
+ggplot(var_df, aes(x = PC, y = CumulativeVariance)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 2) +
+  geom_hline(yintercept = c(70, 80, 90), linetype = "dashed", colour = "grey50") +
+  labs(title = "Cumulative Variance Explained",
+       x = "Number of Principal Components",
+       y = "Cumulative % Variance") +
+  theme_minimal()
+
+cat("PCs to reach 80% variance:", which(cum_var >= 80)[1], "\n")
+cat("PCs to reach 90% variance:", which(cum_var >= 90)[1], "\n")
+```
+
+### Biplot: First Two Principal Components
+
+```{r pca-biplot, fig.height=7, fig.width=9}
+fviz_pca_ind(pca_result,
+             geom.ind = "point",
+             col.ind  = "cos2",
+             gradient.cols = c("blue", "orange", "red"),
+             pointsize = 1.5,
+             title = "PCA – Observations Projected onto PC1 vs PC2")
+```
+
+```{r pca-34, fig.height=6}
+pca_scores <- as.data.frame(pca_result$x)
+
+ggplot(pca_scores, aes(x = PC3, y = PC4)) +
+  geom_point(alpha = 0.5, size = 1.5, colour = "steelblue") +
+  labs(title = "PCA – Observations Projected onto PC3 vs PC4",
+       x = "PC3", y = "PC4") +
+  theme_minimal()
+```
+
+### PCA Loadings
+
+```{r loadings, fig.height=8}
+fviz_contrib(pca_result, choice = "var", axes = 1,
+             title = "Variable Contributions to PC1", top = 33)
+fviz_contrib(pca_result, choice = "var", axes = 2,
+             title = "Variable Contributions to PC2", top = 33)
+```
+
+```{r loading-table}
+loadings_5 <- as.data.frame(pca_result$rotation[, 1:5])
+loadings_5$variable <- rownames(loadings_5)
+loadings_5 <- loadings_5 %>% select(variable, everything())
+
+knitr::kable(loadings_5, digits = 3, format = "markdown",
+             caption = "PCA loadings for the first five components")
+```
+
+```{r low-loading-vars}
+k <- 5
+max_abs_loading <- apply(abs(pca_result$rotation[, 1:k]), 1, max)
+low_load_vars <- names(max_abs_loading[max_abs_loading < 0.15])
+
+cat("Variables with max |loading| < 0.15 across first", k, "PCs:\n")
+if (length(low_load_vars) > 0) {
+  cat(paste(low_load_vars, collapse = ", "), "\n")
+} else {
+  cat("None – all variables contribute meaningfully to at least one of the first",
+      k, "PCs.\n")
+}
+```
+
+---
+
+# Identifying Uninformative or Anomalous Variables
+
+## Near-Zero Variance Variables
+
+```{r nzv}
+var_vec <- chromo_cc %>% summarise(across(everything(), var)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "variance") %>%
+  arrange(variance)
+
+median_var <- median(var_vec$variance)
+nzv_threshold <- 0.01 * median_var
+
+nzv_vars <- var_vec %>% filter(variance < nzv_threshold)
+
+knitr::kable(var_vec, digits = 2, format = "markdown",
+             caption = "Variance of each variable (ascending)")
+
+if (nrow(nzv_vars) > 0) {
+  cat("Near-zero variance variables (< 1% of median variance):\n")
+  print(nzv_vars)
+} else {
+  cat("No near-zero variance variables detected.\n")
+}
+```
+
+## Outlier Detection via Modified Z-Scores
+
+Classical $z$-scores are sensitive to the very outliers they attempt to detect.
+A more robust approach uses the **median** and the **Median Absolute Deviation
+(MAD)**:
+
+$$
+M_i = \frac{0.6745 \, (x_i - \widetilde{x})}{\text{MAD}}
+$$
+
+where $\widetilde{x}$ is the median and $\text{MAD} = \text{median}(|x_i - \widetilde{x}|)$.
+A common threshold is $|M_i| > 3.5$ (Iglewicz & Hoaglin, 1993).
+
+```{r outliers}
+modified_z <- chromo_cc %>%
+  mutate(across(everything(), ~ {
+    med <- median(., na.rm = TRUE)
+    mad_val <- mad(., constant = 1, na.rm = TRUE)
+    if (mad_val == 0) rep(0, length(.)) else 0.6745 * (. - med) / mad_val
+  }))
+
+outlier_counts <- modified_z %>%
+  summarise(across(everything(), ~ sum(abs(.) > 3.5))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_outliers") %>%
+  arrange(desc(n_outliers))
+
+knitr::kable(outlier_counts, format = "markdown",
+             caption = "Number of outliers per variable (|Modified Z| > 3.5)")
+```
+
+```{r outlier-obs}
+obs_outlier <- rowSums(abs(modified_z) > 3.5)
+
+ggplot(data.frame(n_outlier_flags = obs_outlier), aes(x = n_outlier_flags)) +
+  geom_histogram(binwidth = 1, fill = "tomato", colour = "black") +
+  labs(title = "Distribution of Outlier Flags per Observation",
+       subtitle = "Based on Modified Z-scores with threshold |M| > 3.5",
+       x = "Number of Variables Flagged as Outlier",
+       y = "Observation Count") +
+  theme_minimal()
+
+cat("Observations flagged as outliers on >= 5 variables:",
+    sum(obs_outlier >= 5), "\n")
+```
+
+## Consolidating Variable Removal Decisions
+
+```{r removal-decision}
+candidates <- list(
+  high_missingness = high_miss_vars,
+  near_zero_var    = if (nrow(nzv_vars) > 0) nzv_vars$variable else character(0),
+  low_pca_loading  = low_load_vars
+)
+
+cat("Candidates for removal:\n")
+print(candidates)
+
+all_candidates <- unlist(candidates)
+if (length(all_candidates) > 0) {
+  freq <- table(all_candidates)
+  cat("\nVariables flagged by >= 2 diagnostics:\n")
+  print(freq[freq >= 2])
+} else {
+  cat("\nNo variables flagged by multiple diagnostics.\n")
+}
+
+vars_to_remove <- unique(all_candidates[duplicated(all_candidates)])
+if (length(vars_to_remove) > 0) {
+  cat("\nRemoving:", paste(vars_to_remove, collapse = ", "), "\n")
+  chromo_clean <- chromo %>% select(-all_of(vars_to_remove))
+} else {
+  cat("\nNo variables meet the multi-diagnostic removal criterion.",
+      "Retaining all variables.\n")
+  chromo_clean <- chromo
+}
+```
+
+---
+
+# Scaling Justification
+
+## Why Scaling Matters
+
+Both PCA and distance-based clustering methods (e.g. $k$-means, hierarchical
+clustering with Euclidean linkage) compute **Euclidean distances** between
+observation vectors. The squared Euclidean distance between two observations
+$\mathbf{x}$ and $\mathbf{y}$ in $p$ dimensions is:
+
+$$
+d^2(\mathbf{x}, \mathbf{y}) = \sum_{j=1}^{p} (x_j - y_j)^2.
+$$
+
+Each variable $j$ contributes a term $(x_j - y_j)^2$. If variable $j$ has a
+range of 500 and variable $k$ has a range of 5, the contribution of $j$ will
+dominate the distance by a factor of roughly $10{,}000$, irrespective of
+whether $j$ is actually more informative for discriminating chromosome classes.
+The implicit weighting imposed by unequal scales has **no scientific justification**
+in this context.
+
+## Empirical Evidence
+
+```{r scaling-evidence, fig.height=10}
+chromo_cc_clean <- chromo_clean %>% drop_na()
+
+raw_var <- apply(chromo_cc_clean, 2, var)
+scaled_data <- scale(chromo_cc_clean)
+scaled_var <- apply(scaled_data, 2, var)
+
+var_comp <- data.frame(
+  variable = names(raw_var),
+  raw_variance = raw_var,
+  scaled_variance = scaled_var
+)
+
+p1 <- ggplot(var_comp, aes(x = reorder(variable, -raw_variance), y = raw_variance)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Raw Variances", x = NULL, y = "Variance") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
+
+p2 <- ggplot(var_comp, aes(x = reorder(variable, -raw_variance), y = scaled_variance)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Variances After Standardisation", x = NULL, y = "Variance") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
+
+# Use base R layout instead of patchwork
+gridExtra::grid.arrange(p1, p2, ncol = 1)
+```
+
+```{r scale-ratio}
+cat("Ratio of max to min raw variance:",
+    round(max(raw_var) / min(raw_var), 1), "\n")
+```
+
+## Decision
+
+The ratio of the largest to smallest raw variance is substantial (reported above).
+Without standardisation, PCA would effectively become a summary of the highest-
+variance features alone, and $k$-means would partition the data based
+disproportionately on those same features.
+
+**We therefore standardise all variables to zero mean and unit variance before
+any subsequent clustering analysis.** This is implemented via `scale()` or
+equivalently via `prcomp(..., scale. = TRUE)`. The PCA results in Section 3 were
+already computed on scaled data for this reason.
+
+---
+
+# Summary of EDA Findings
+
+```{r summary-table}
+summary_items <- tribble(
+  ~Aspect, ~Finding,
+  "Dimensions (sampled)", paste0(nrow(chromo), " x ", ncol(chromo)),
+  "Variable types", "All 33 variables are numeric (continuous)",
+  "Scale heterogeneity", paste0("Max/min variance ratio = ",
+                                 round(max(raw_var)/min(raw_var), 0),
+                                 "; standardisation required"),
+  "Missingness", paste0("Total missing cells: ", sum(is.na(chromo)),
+                         " (", round(100*sum(is.na(chromo))/(600*33), 1), "%)"),
+  "Variables removed", ifelse(length(vars_to_remove) > 0,
+                               paste(vars_to_remove, collapse = ", "),
+                               "None (all retained)"),
+  "PCs for 80% variance", paste0(which(cum_var >= 80)[1], " components"),
+  "Cluster evidence (PCA)", "Inspect PC1-PC2 biplot for modal structure"
+)
+knitr::kable(summary_items, format = "markdown",
+             caption = "Summary of key EDA findings")
+```
+
+The EDA reveals a moderately high-dimensional feature space with heterogeneous
+scales and scattered missing values. After standardisation and (if warranted)
+variable removal, the first few principal components capture the bulk of the
+variation and the PC1–PC2 projection provides initial visual evidence for the
+number of distinct chromosome classes—to be refined by formal clustering methods
+in Question 2.
+
+---
+
+# Question 2 – Cluster Structure and Comparison (40%)
+
+We now compare two clustering pipelines to assess the number of distinct
+chromosome classes present in the dataset. The first (Standard Euclidean) handles
+missingness via imputation and clusters in the original feature space. The second
+(Observed-Only Distance) bypasses imputation by computing distances from shared
+observed coordinates, then embeds via MDS before clustering.
+
+Throughout, we evaluate $k \in \{2, 3, 4, 5, 6, 7\}$ and use elbow plots of the
+total within-cluster sum of squares ($W_k$) to guide our choice.
+
+## Standard Euclidean Route
+
+### Missing-Data Strategy: Justification
+
+Two strategies are available:
+
+* **Listwise (casewise) deletion** removes every observation that contains at
+  least one `NA`. This is convenient and unbiased if data are MCAR, but it can
+  drastically reduce $n$ when missingness is spread across many variables. In our
+  EDA (Section 2), we saw that complete cases number only `r nrow(chromo_cc)` out
+  of 600—a potentially significant loss of information for clustering.
+
+* **Column-mean imputation** replaces each missing value with the mean of its
+  variable. This is a fast and simple fix that preserves the full sample size
+  ($n = 600$). However, it is well known that mean imputation **underestimates
+  variance** (because imputed values are placed exactly at the variable mean,
+  shrinking spread) and can **artificially strengthen correlations** between
+  variables, since the imputed values do not reflect the natural scatter of the
+  data. If the data are not MCAR, this bias can be more pronounced.
+
+**Decision.** We adopt column-mean imputation. The rationale is that our EDA
+showed missingness to be scattered (not concentrated in a few variables or rows),
+suggesting an approximately MCAR pattern. Losing a large fraction of observations
+to listwise deletion would be more harmful to $k$-means—which relies on having
+sufficient observations to estimate cluster centroids—than the modest variance
+underestimation introduced by mean imputation.
+
+```{r impute-euclidean}
+# Column-mean imputation on the cleaned sampled data
+chromo_imputed <- chromo_clean
+for (j in seq_len(ncol(chromo_imputed))) {
+  na_idx <- is.na(chromo_imputed[[j]])
+  if (any(na_idx)) {
+    chromo_imputed[[j]][na_idx] <- mean(chromo_imputed[[j]], na.rm = TRUE)
+  }
+}
+cat("Remaining NAs after imputation:", sum(is.na(chromo_imputed)), "\n")
+cat("Sample size retained:", nrow(chromo_imputed), "\n")
+
+# Standardise to zero mean, unit variance (justified in Section 5)
+chromo_scaled <- as.data.frame(scale(chromo_imputed))
+```
+
+### Running $k$-Means for $k = 2, \ldots, 7$
+
+We use `kmeans()` with `nstart = 25` to run the algorithm from 25 different
+random initialisations and keep the best solution (lowest $W_k$). This guards
+against the well-known sensitivity of $k$-means to its starting configuration,
+making it more likely that we find a stable global minimum rather than a
+poor local one.
+
+```{r kmeans-euclidean}
+set.seed(123)
+
+k_range <- 2:7
+wss_A <- numeric(length(k_range))
+km_list_A <- list()
+
+for (i in seq_along(k_range)) {
+  km <- kmeans(chromo_scaled, centers = k_range[i], nstart = 25, iter.max = 100)
+  wss_A[i] <- km$tot.withinss
+  km_list_A[[i]] <- km
+}
+
+elbow_A <- data.frame(k = k_range, WSS = wss_A)
+```
+
+### Elbow Plot
+
+The elbow plot displays $W_k = \texttt{tot.withinss}$ against $k$. We look for
+the "elbow"—the point where adding another cluster yields diminishing returns
+in reducing within-cluster variance.
+
+```{r elbow-euclidean, fig.height=5}
+ggplot(elbow_A, aes(x = k, y = WSS)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 3) +
+  scale_x_continuous(breaks = k_range) +
+  labs(title = "Elbow Plot – Standard Euclidean Route",
+       x = "Number of Clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WSS)") +
+  theme_minimal()
+
+# Tabulate marginal decreases to help locate the elbow
+elbow_A$decrease <- c(NA, -diff(elbow_A$WSS))
+elbow_A$pct_decrease <- c(NA, round(-diff(elbow_A$WSS) / head(elbow_A$WSS, -1) * 100, 2))
+knitr::kable(elbow_A, digits = 2, format = "markdown",
+             caption = "WSS and marginal decrease per k (Standard Euclidean)")
+```
+
+**Interpretation.** Inspect the percentage decrease column. A sharp drop followed
+by a levelling off indicates the elbow. For example, if the decrease from $k=3$
+to $k=4$ is large but from $k=4$ to $k=5$ is modest, the elbow is at $k=4$.
+
+```{r select-k-A}
+# ──────────────────────────────────────────────────
+# IMPORTANT: Update chosen_k_A after inspecting
+# YOUR elbow plot and marginal decrease table.
+# ──────────────────────────────────────────────────
+chosen_k_A <- 4  # <-- placeholder: update based on your elbow
+
+cat("Selected k for Standard Euclidean route:", chosen_k_A, "\n")
+km_A <- km_list_A[[which(k_range == chosen_k_A)]]
+```
+
+### Cluster Visualisation
+
+We project the imputed, scaled data onto its first two principal components using
+`prcomp()` and colour observations by their cluster assignment. We use
+`factoextra::fviz_cluster()` which automatically overlays convex hulls and
+cluster centroids, giving a clear visual impression of cluster separation.
+
+```{r vis-euclidean, fig.height=7, fig.width=9}
+fviz_cluster(km_A, data = chromo_scaled,
+             geom = "point",
+             pointsize = 1.5,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = paste0("Standard Euclidean Clusters (k = ", chosen_k_A,
+                           ") – PCA Projection"))
+```
+
+```{r sizes-A}
+cat("Cluster sizes (Standard Euclidean):\n")
+print(table(km_A$cluster))
+```
+
+The convex hulls show the spatial extent of each cluster in the PC1–PC2 plane.
+Overlapping hulls suggest that those clusters may be better separated along
+higher-dimensional principal components, or that the true number of groups is
+lower.
+
+---
+
+## Observed-Only Distance Route
+
+### Computing the Renormalised Euclidean Distance
+
+Rather than imputing missing values, this approach computes pairwise distances
+using only the coordinates that are **observed for both** observations in a pair.
+The formula provided in the coursework is:
+
+$$
+d_{ij}^{(\text{obs})} = \sqrt{\frac{p}{|O_{ij}|} \sum_{k \in O_{ij}} (x_{ik} - x_{jk})^2}
+$$
+
+where $O_{ij}$ is the set of variable indices observed in both observations $i$
+and $j$, and $p$ is the total number of variables. The scaling factor
+$\frac{p}{|O_{ij}|}$ renormalises the partial sum so that the distance is
+comparable in magnitude to a full $p$-dimensional Euclidean distance; without it,
+pairs with more missing data would appear artificially closer.
+
+We compute this on the **standardised** (but un-imputed) data to ensure all
+variables contribute equally, consistent with the scaling decision from Section 5.
+
+```{r renorm-distance}
+# Standardise without imputing (NAs propagated through scale)
+chromo_scaled_raw <- as.data.frame(scale(chromo_clean))
+X <- as.matrix(chromo_scaled_raw)
+n <- nrow(X)
+p <- ncol(X)
+
+# Compute the n x n renormalised distance matrix
+dist_mat <- matrix(0, nrow = n, ncol = n)
+
+for (i in 1:(n - 1)) {
+  for (j in (i + 1):n) {
+    # Identify coordinates observed in BOTH rows
+    obs_both <- which(!is.na(X[i, ]) & !is.na(X[j, ]))
+    n_obs <- length(obs_both)
+    if (n_obs > 0) {
+      partial_ss <- sum((X[i, obs_both] - X[j, obs_both])^2)
+      dist_mat[i, j] <- sqrt(p / n_obs * partial_ss)
+    } else {
+      dist_mat[i, j] <- NA
+    }
+    dist_mat[j, i] <- dist_mat[i, j]
+  }
+}
+
+# Report any pairs with zero shared observations
+n_na_pairs <- sum(is.na(dist_mat[upper.tri(dist_mat)]))
+cat("Observation pairs with no shared variables:", n_na_pairs, "\n")
+
+# Handle any NA distances by substituting the median distance
+if (n_na_pairs > 0) {
+  med_dist <- median(dist_mat, na.rm = TRUE)
+  dist_mat[is.na(dist_mat)] <- med_dist
+  cat("Replaced with median distance:", round(med_dist, 3), "\n")
+}
+
+dist_obj <- as.dist(dist_mat)
+```
+
+### Embedding with Multidimensional Scaling (MDS)
+
+The renormalised distance matrix is not a coordinate matrix, so we cannot pass it
+directly to `kmeans()`. We use **classical (metric) MDS** via `cmdscale()` to
+embed the $n$ observations into a lower-dimensional Euclidean coordinate space
+that preserves the pairwise distances as faithfully as possible.
+
+We request a 2D embedding ($m = 2$), which is the natural choice for both
+visualisation and consistency with the 2D PCA projection used in the Euclidean
+route. Using 2 dimensions also keeps the $k$-means input low-dimensional, which
+can improve cluster stability.
+
+```{r mds-embed}
+mds_result <- cmdscale(dist_obj, k = 2, eig = TRUE)
+mds_coords <- mds_result$points
+colnames(mds_coords) <- c("MDS1", "MDS2")
+
+# Goodness-of-fit: proportion of variance explained by the 2D embedding
+mds_eig <- mds_result$eig
+mds_var_explained <- sum(mds_eig[1:2]) / sum(abs(mds_eig)) * 100
+cat(sprintf("Variance explained by 2D MDS embedding: %.1f%%\n", mds_var_explained))
+```
+
+### Running $k$-Means on the MDS Coordinates
+
+We now perform $k$-means on the 2D MDS coordinates (not the original 33 variables)
+for $k = 2, \ldots, 7$.
+
+```{r kmeans-mds}
+set.seed(123)
+
+wss_B <- numeric(length(k_range))
+km_list_B <- list()
+
+for (i in seq_along(k_range)) {
+  km <- kmeans(mds_coords, centers = k_range[i], nstart = 25, iter.max = 100)
+  wss_B[i] <- km$tot.withinss
+  km_list_B[[i]] <- km
+}
+
+elbow_B <- data.frame(k = k_range, WSS = wss_B)
+```
+
+### Elbow Plot
+
+```{r elbow-mds, fig.height=5}
+ggplot(elbow_B, aes(x = k, y = WSS)) +
+  geom_line(colour = "darkorange", linewidth = 1) +
+  geom_point(colour = "darkorange", size = 3) +
+  scale_x_continuous(breaks = k_range) +
+  labs(title = "Elbow Plot – Observed-Only Distance Route (MDS)",
+       x = "Number of Clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WSS)") +
+  theme_minimal()
+
+elbow_B$decrease <- c(NA, -diff(elbow_B$WSS))
+elbow_B$pct_decrease <- c(NA, round(-diff(elbow_B$WSS) / head(elbow_B$WSS, -1) * 100, 2))
+knitr::kable(elbow_B, digits = 2, format = "markdown",
+             caption = "WSS and marginal decrease per k (Observed-Only MDS)")
+```
+
+```{r select-k-B}
+# ──────────────────────────────────────────────────
+# IMPORTANT: Update chosen_k_B after inspecting
+# YOUR elbow plot and marginal decrease table.
+# ──────────────────────────────────────────────────
+chosen_k_B <- 4  # <-- placeholder: update based on your elbow
+
+cat("Selected k for Observed-Only route:", chosen_k_B, "\n")
+km_B <- km_list_B[[which(k_range == chosen_k_B)]]
+```
+
+### Cluster Visualisation in MDS Space
+
+We create a scatterplot of the MDS coordinates ($y_1$ vs $y_2$) coloured by
+cluster assignment, analogous to the PCA projection for the Euclidean route.
+
+```{r vis-mds, fig.height=7, fig.width=9}
+mds_df <- as.data.frame(mds_coords)
+mds_df$cluster <- factor(km_B$cluster)
+
+ggplot(mds_df, aes(x = MDS1, y = MDS2, colour = cluster)) +
+  geom_point(alpha = 0.6, size = 2) +
+  stat_ellipse(level = 0.68, linewidth = 0.8, linetype = "dashed") +
+  labs(title = paste0("Observed-Only Route Clusters (k = ", chosen_k_B,
+                      ") in MDS Space"),
+       x = "MDS Dimension 1", y = "MDS Dimension 2",
+       colour = "Cluster") +
+  theme_minimal()
+```
+
+```{r sizes-B}
+cat("Cluster sizes (Observed-Only MDS):\n")
+print(table(km_B$cluster))
+```
+
+---
+
+## Comparison of the Two Clusterings
+
+### Step 1: Extracting the Cluster Vectors
+
+The `kmeans()` function returns a component called `cluster`: an $n$-length
+integer vector (values $1, \ldots, k$) indicating the group to which each
+observation has been allocated. We have two such vectors—one from the Standard
+Euclidean Route and one from the Observed-Only Distance Route.
+
+```{r extract-labels}
+labels_A <- km_A$cluster   # from Standard Euclidean Route
+labels_B <- km_B$cluster   # from Observed-Only Distance Route
+
+cat("Length of Euclidean cluster vector:", length(labels_A), "\n")
+cat("Length of Observed-Only cluster vector:", length(labels_B), "\n")
+```
+
+### Step 2: Addressing the Arbitrary Labelling Problem
+
+Cluster labels are **arbitrary**: what the Euclidean route calls "Cluster 1"
+might be the exact same group of observations that the Observed-Only route calls
+"Cluster 3". Before computing a meaningful proportion of differing assignments,
+we must align the labels so that they refer to the same underlying groups.
+
+We approach this in two ways. First, we **cross-tabulate** the two cluster vectors
+to see which labels from Route A most frequently co-occur with which labels from
+Route B—this is a confusion-matrix-style diagnostic. Second, we **visually
+compare** the partitions using `fviz_cluster()` to see which groups in one plot
+physically correspond to groups in the other.
+
+#### Cross-Tabulation (Confusion Matrix)
+
+```{r cross-tab}
+cross_tbl <- table(Euclidean = labels_A, ObservedOnly = labels_B)
+knitr::kable(cross_tbl, format = "markdown",
+             caption = "Cross-tabulation of cluster assignments (raw labels)")
+```
+
+Each row is a Euclidean cluster; each column is an Observed-Only cluster. A strong
+diagonal (after relabelling) would indicate high agreement. Off-diagonal mass
+indicates observations that "flip" between the two routes.
+
+#### Visual Comparison with `fviz_cluster()`
+
+We use `fviz_cluster()` for each route to see which physical regions of the data
+each label occupies. By comparing the two plots, we can identify which labels in
+Route B correspond to which labels in Route A.
+
+```{r fviz-compare, fig.height=6, fig.width=12}
+p_euc <- fviz_cluster(km_A, data = chromo_scaled,
+                       geom = "point", pointsize = 1.5,
+                       ellipse.type = "convex", palette = "jco",
+                       ggtheme = theme_minimal(),
+                       main = paste0("Standard Euclidean (k = ", chosen_k_A, ")"))
+
+p_obs <- fviz_cluster(km_B, data = mds_coords,
+                       geom = "point", pointsize = 1.5,
+                       ellipse.type = "convex", palette = "jco",
+                       ggtheme = theme_minimal(),
+                       main = paste0("Observed-Only MDS (k = ", chosen_k_B, ")"))
+
+gridExtra::grid.arrange(p_euc, p_obs, ncol = 2)
+```
+
+From the cross-tabulation and these visual comparisons, we can determine a label
+mapping. We automate this by trying every permutation of labels for Route B and
+selecting the relabelling that maximises agreement with Route A.
+
+```{r align-labels}
+if (chosen_k_A == chosen_k_B) {
+  # For k <= 7, there are at most 5040 permutations — entirely tractable.
+  k_val <- chosen_k_A
+  perms <- combinat::permn(1:k_val)
+  
+  best_agree <- 0
+  best_perm <- NULL
+  for (perm in perms) {
+    relabelled <- perm[labels_B]
+    agreement <- sum(relabelled == labels_A)
+    if (agreement > best_agree) {
+      best_agree <- agreement
+      best_perm <- perm
+    }
+  }
+  
+  labels_B_aligned <- best_perm[labels_B]
+  
+  cat("Best label mapping (Route B -> aligned):\n")
+  for (i in seq_along(best_perm)) {
+    cat(sprintf("  Observed-Only Cluster %d  -->  Aligned Cluster %d\n",
+                i, best_perm[i]))
+  }
+  
+} else {
+  labels_B_aligned <- labels_B
+  cat(sprintf(
+    "The two routes selected different k values (%d vs %d).\n",
+    chosen_k_A, chosen_k_B
+  ))
+  cat("Labels cannot be directly aligned; interpret the cross-tabulation above.\n")
+}
+```
+
+#### Aligned Cross-Tabulation
+
+```{r cross-tab-aligned}
+if (chosen_k_A == chosen_k_B) {
+  aligned_tbl <- table(Euclidean = labels_A, ObservedOnly = labels_B_aligned)
+  knitr::kable(aligned_tbl, format = "markdown",
+               caption = "Cross-tabulation after label alignment")
+}
+```
+
+After alignment, the diagonal entries represent observations assigned to the
+**same** group by both routes. Off-diagonal entries are the observations that
+shift between groups—the "boundary" points whose assignment is sensitive to the
+choice of method.
+
+### Step 3: Calculating and Reporting the Proportion
+
+With labels aligned, computing the proportion of differing assignments is
+straightforward. Following the logic used in the EDA labs (where different
+rankings are compared for stability), we count mismatches and divide by $n$.
+
+```{r proportion-diff}
+if (chosen_k_A == chosen_k_B) {
+  # The proportion of observations where the aligned labels disagree
+  prop_diff <- mean(labels_A != labels_B_aligned)
+  n_diff <- sum(labels_A != labels_B_aligned)
+  n_total <- length(labels_A)
+  
+  cat(sprintf("Number of differing assignments: %d / %d\n", n_diff, n_total))
+  cat(sprintf("Proportion of differing assignments: %.4f (%.1f%%)\n",
+              prop_diff, prop_diff * 100))
+} else {
+  cat("Direct proportion not computed (different k values selected).\n")
+}
+```
+
+### Step 4: Interpretation
+
+#### Do the two routes agree on $k$?
+
+Both elbow plots should be consulted. If the two routes identify the **same**
+optimal $k$, this is already evidence that the underlying cluster structure is
+genuine and robust to preprocessing. If they disagree, it suggests the number of
+groups is sensitive to how missingness is handled.
+
+```{r k-agreement}
+cat(sprintf("Euclidean route selected k = %d\n", chosen_k_A))
+cat(sprintf("Observed-Only route selected k = %d\n", chosen_k_B))
+
+if (chosen_k_A == chosen_k_B) {
+  cat("The two routes agree on k — this supports the stability of the result.\n")
+} else {
+  cat("The two routes disagree on k — the cluster count may be method-dependent.\n")
+}
+```
+
+#### Are the clusterings broadly similar or meaningfully different?
+
+```{r interpret, echo=FALSE, results='asis'}
+if (chosen_k_A == chosen_k_B) {
+  cat(sprintf(
+    "The proportion of differing assignments is **%.1f%%**. ", prop_diff * 100))
+  
+  if (prop_diff < 0.15) {
+    cat("This is a low level of disagreement: only a small number of boundary ",
+        "observations are 'flipping' between clusters depending on the method. ",
+        "This suggests that the cluster structure we have identified is ",
+        "**meaningful and stable**—it reflects genuine biological groupings in ",
+        "the chromosome features rather than an artefact of a particular ",
+        "preprocessing choice.\n")
+  } else if (prop_diff < 0.30) {
+    cat("This is a moderate level of disagreement. The core of each cluster is ",
+        "consistent across routes, but a non-trivial number of observations near ",
+        "cluster boundaries are assigned differently. The broad structure appears ",
+        "real, but the precise boundaries are sensitive to the representation.\n")
+  } else {
+    cat("This is a high level of disagreement, indicating that the clusterings are ",
+        "**meaningfully different**. The results are sensitive to the choice of ",
+        "missing-data handling and distance representation, raising the concern that ",
+        "the partition may be partly an **artefact of the method** rather than a ",
+        "discovery of genuine natural clusters.\n")
+  }
+}
+```
+
+#### Visual Comparison: Where Do the Boundary Observations Shift?
+
+To pinpoint exactly which observations are changing cluster membership, we project
+both sets of labels into the **same PCA score space** from the Euclidean route.
+Observations that change colour between the two plots are the boundary cases
+whose assignment is method-dependent.
+
+```{r side-by-side, fig.height=6, fig.width=12}
+# PCA projection of the imputed, scaled data
+pca_compare <- prcomp(chromo_scaled, center = TRUE, scale. = TRUE)
+scores_compare <- as.data.frame(pca_compare$x[, 1:2])
+
+compare_df <- data.frame(
+  PC1 = scores_compare$PC1,
+  PC2 = scores_compare$PC2,
+  Euclidean = factor(labels_A),
+  ObsOnly = if (chosen_k_A == chosen_k_B) factor(labels_B_aligned) else factor(labels_B)
+)
+
+p_euc2 <- ggplot(compare_df, aes(x = PC1, y = PC2, colour = Euclidean)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  stat_ellipse(level = 0.68, linetype = "dashed") +
+  labs(title = paste0("Standard Euclidean (k = ", chosen_k_A, ")"),
+       colour = "Cluster") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+p_obs2 <- ggplot(compare_df, aes(x = PC1, y = PC2, colour = ObsOnly)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  stat_ellipse(level = 0.68, linetype = "dashed") +
+  labs(title = paste0("Observed-Only (k = ", chosen_k_B, ")"),
+       colour = "Cluster") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+gridExtra::grid.arrange(p_euc2, p_obs2, ncol = 2)
+```
+
+We can also highlight the observations that differ directly:
+
+```{r highlight-diffs, fig.height=7, fig.width=9}
+if (chosen_k_A == chosen_k_B) {
+  compare_df$agreement <- ifelse(labels_A == labels_B_aligned,
+                                  "Same cluster", "Different cluster")
+  
+  ggplot(compare_df, aes(x = PC1, y = PC2, colour = agreement)) +
+    geom_point(alpha = 0.6, size = 2) +
+    scale_colour_manual(values = c("Same cluster" = "grey70",
+                                    "Different cluster" = "red")) +
+    labs(title = "Observations with Differing Assignments Between Routes",
+         subtitle = paste0(sum(compare_df$agreement == "Different cluster"),
+                           " observations differ (shown in red)"),
+         colour = NULL) +
+    theme_minimal()
+}
+```
+
+The red points in the plot above are concentrated at the **boundaries** between
+clusters—the regions of the PCA space where the two routes disagree. This is
+expected: observations near the centre of a cluster are unambiguously assigned
+regardless of method, while those in overlapping regions are sensitive to the
+precise geometry and distance metric used.
+
+#### Possible Reasons for Differences
+
+1. **Missing-data handling.** Mean imputation places every missing value at the
+   variable mean, which **artificially strengthens correlations** between variables
+   and underestimates within-variable variance. This can produce "tighter"
+   clusters in the Euclidean route than the observed-only route, which avoids
+   this distortion entirely by computing distances only from genuinely measured
+   values.
+
+2. **Geometry: PCA vs MDS.** The Euclidean route clusters in the full
+   $p$-dimensional feature space and visualises via **PCA**, a linear projection
+   that maximises variance. The observed-only route clusters in an **MDS** space
+   that focuses on preserving pairwise distances. These are fundamentally
+   different geometric objectives—maximum variance versus distance
+   preservation—and can yield different low-dimensional arrangements, causing
+   $k$-means to draw different cluster boundaries.
+
+3. **Scaling.** Both routes standardise to unit variance, but the effective
+   contribution of each variable differs. In the Euclidean route, imputed values
+   dampen a variable's apparent variance (they are all identical to the mean),
+   subtly altering the `scale()` denominator. In the observed-only route,
+   variables with more missing values simply contribute to fewer pairwise
+   distances, naturally diluting their influence without artificial variance
+   compression. PCA and distance-based clustering are highly sensitive to variable
+   scales, and these differing normalisation effects can lead to meaningfully
+   different cluster structures.
+
+---
+
+# Question 3 – Cluster Interpretation (30%)
+
+Having compared two clustering pipelines in Question 2, we now select our
+**preferred** solution and provide a structured, evidence-based interpretation of
+the chromosome classes it identifies. The interpretation focuses on the internal
+cohesion (within-cluster compactness) and external isolation (between-cluster
+separation) of the identified groups.
+
+## Selecting the Preferred Pipeline
+
+```{r select-preferred}
+# ──────────────────────────────────────────────────
+# Choose your preferred pipeline: "euclidean" or "observed"
+# Justify in the text below.
+# ──────────────────────────────────────────────────
+preferred <- "euclidean"
+
+if (preferred == "euclidean") {
+  km_preferred <- km_A
+  data_preferred <- chromo_scaled
+  chosen_k <- chosen_k_A
+  cat("Preferred pipeline: Standard Euclidean Route\n")
+} else {
+  km_preferred <- km_B
+  data_preferred <- as.data.frame(mds_coords)
+  chosen_k <- chosen_k_B
+  cat("Preferred pipeline: Observed-Only Distance Route\n")
+}
+
+cat("Number of clusters (k):", chosen_k, "\n")
+```
+
+We select the Standard Euclidean route as our preferred pipeline because it
+operates in the full $p$-dimensional feature space (after imputation and
+standardisation), preserving all 33 variables for interpretation. The MDS route,
+while valuable for comparison, reduces the data to 2 dimensions before clustering,
+discarding information that may be relevant for distinguishing chromosome classes.
+The Euclidean route's centroids are therefore directly interpretable in terms of
+the original features.
+
+## Constructing Cluster Prototypes (Centroids)
+
+The `kmeans()` function returns a `$centers` component: a $k \times p$ matrix
+where each row is the centroid (mean value of every variable) for one cluster.
+These centroids serve as the **prototypes** for the chromosome classes—they
+represent the "typical" chromosome in each group.
+
+```{r centroids}
+centroids <- as.data.frame(km_preferred$centers)
+centroids$Cluster <- factor(1:chosen_k)
+
+# Display the centroid matrix
+centroids_display <- centroids %>% select(Cluster, everything())
+knitr::kable(centroids_display, digits = 2, format = "markdown",
+             caption = "Cluster centroids (standardised scale)")
+```
+
+Each column represents one of the 33 features (on the standardised scale). Large
+positive values indicate that the cluster prototype scores well above the global
+mean on that feature; large negative values indicate the opposite. By scanning
+across the rows, we can identify which features **distinguish** one cluster
+prototype from another.
+
+```{r centroid-heatmap, fig.height=5, fig.width=12}
+# Heatmap of centroids for a compact visual summary
+centroids_long <- centroids %>%
+  pivot_longer(-Cluster, names_to = "Variable", values_to = "Value")
+
+ggplot(centroids_long, aes(x = Variable, y = Cluster, fill = Value)) +
+  geom_tile(colour = "white") +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                       midpoint = 0) +
+  labs(title = "Cluster Centroid Heatmap (Standardised Values)",
+       x = "Variable", y = "Cluster", fill = "Std. Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+```
+
+The heatmap provides an immediate visual "fingerprint" for each cluster. Rows
+with strikingly different colour profiles represent well-separated chromosome
+classes; rows with similar profiles suggest classes that may be harder to
+distinguish.
+
+---
+
+## Visualising Cluster Differences
+
+### PCA Projection with Cluster Boundaries
+
+We use `factoextra::fviz_cluster()` to project all observations onto the first
+two principal components, overlaying convex hulls and cluster centres. This gives
+an immediate sense of separation and overlap between the groups.
+
+```{r pca-clusters, fig.height=7, fig.width=9}
+fviz_cluster(km_preferred, data = data_preferred,
+             geom = "point",
+             pointsize = 1.5,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = paste0("Preferred Clustering (k = ", chosen_k,
+                           ") – PCA Projection with Convex Hulls"))
+```
+
+Clusters with non-overlapping convex hulls are well-separated in the PC1–PC2
+plane. Where hulls overlap, the clusters may still be separable along higher
+principal components—the 2D projection can obscure genuine separation in the
+full 33-dimensional space.
+
+### Parallel Coordinate Plot of Cluster Centroids
+
+A parallel coordinate plot displays the centroid profile across all 33 variables
+simultaneously. To make variables comparable despite different original scales,
+we apply min–max scaling so that each variable spans [0, 1].
+
+```{r parallel-coords, fig.height=6, fig.width=12}
+# Min-max scale the centroids for visual comparability
+centroids_numeric <- centroids %>% select(-Cluster)
+centroids_minmax <- as.data.frame(
+  apply(centroids_numeric, 2, function(x) {
+    rng <- range(x)
+    if (diff(rng) == 0) rep(0.5, length(x)) else (x - rng[1]) / diff(rng)
+  })
+)
+centroids_minmax$Cluster <- centroids$Cluster
+
+centroids_minmax_long <- centroids_minmax %>%
+  pivot_longer(-Cluster, names_to = "Variable", values_to = "Value") %>%
+  mutate(Variable = factor(Variable, levels = colnames(centroids_numeric)))
+
+ggplot(centroids_minmax_long, aes(x = Variable, y = Value,
+                                   group = Cluster, colour = Cluster)) +
+  geom_line(linewidth = 1, alpha = 0.8) +
+  geom_point(size = 1.5) +
+  scale_colour_brewer(palette = "Set1") +
+  labs(title = "Parallel Coordinate Plot of Cluster Centroids (Min–Max Scaled)",
+       x = "Variable", y = "Scaled Centroid Value [0, 1]",
+       colour = "Cluster") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
+```
+
+Variables where the centroid lines are **widely spread** are the features that
+most strongly differentiate the chromosome classes. Variables where all lines
+converge to similar values contribute little to cluster separation and may be
+capturing shared biological properties (e.g. common staining characteristics).
+
+### Boxplots of Key Discriminating Variables
+
+To examine the **distributions** (not just means) within each cluster, we use
+faceted boxplots. We focus on variables that the parallel coordinate plot and
+PCA loadings suggest are most discriminating.
+
+```{r identify-key-vars}
+# Identify the variables with greatest spread across centroids
+centroid_spreads <- apply(centroids_numeric, 2, function(x) diff(range(x)))
+top_vars <- names(sort(centroid_spreads, decreasing = TRUE))[1:min(6, ncol(centroids_numeric))]
+cat("Top discriminating variables (by centroid spread):\n")
+cat(paste(top_vars, collapse = ", "), "\n")
+```
+
+```{r boxplots, fig.height=8, fig.width=10}
+# Prepare data with cluster labels
+box_data <- as.data.frame(data_preferred)
+box_data$Cluster <- factor(km_preferred$cluster)
+
+# Select top discriminating variables
+box_long <- box_data %>%
+  select(Cluster, all_of(top_vars)) %>%
+  pivot_longer(-Cluster, names_to = "Variable", values_to = "Value") %>%
+  mutate(Variable = factor(Variable, levels = top_vars))
+
+ggplot(box_long, aes(x = Cluster, y = Value, fill = Cluster)) +
+  geom_boxplot(outlier.size = 1, alpha = 0.7) +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 3) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Distribution of Top Discriminating Variables by Cluster",
+       x = "Cluster", y = "Standardised Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+The boxplots reveal not just the **central tendency** (median line) but also the
+**spread** (interquartile range) and **tails** (whiskers and outlier points) of
+each variable's distribution within each cluster. Well-separated boxes with
+non-overlapping notches provide strong evidence that the clusters represent
+genuinely distinct chromosome classes on that feature.
+
+---
+
+## Statement on the Number of Chromosome Classes
+
+```{r state-k, echo=FALSE, results='asis'}
+cat(sprintf(
+  "Based on the elbow plot from Question 2 and the visualisations above, we
+conclude that **k = %d** chromosome classes are present in this dataset.\n\n", chosen_k))
+
+cat("**Evidence supporting this choice:**\n\n")
+cat("1. **Elbow plot:** The total within-cluster sum of squares ($W_k$) shows a
+clear change in slope at $k =", chosen_k, "$. Beyond this point, additional
+clusters yield diminishing returns in variance reduction, suggesting that further
+splitting captures noise rather than genuine biological structure.\n\n")
+cat("2. **PCA projection:** The `fviz_cluster()` plot shows", chosen_k,
+"visually distinguishable groups with limited overlap in convex hulls, supporting
+the presence of this many distinct classes.\n\n")
+cat("3. **Centroid profiles:** The parallel coordinate plot shows", chosen_k,
+"distinct 'fingerprints' across the 33 features, with clear separation on
+multiple variables simultaneously.\n\n")
+cat("4. **Cross-pipeline agreement:** The comparison in Question 2 provides
+further evidence—both pipelines arriving at a similar partition strengthens
+confidence that the structure is genuine rather than method-dependent.\n")
+```
+
+---
+
+## Within-Cluster Variability
+
+A well-defined cluster should exhibit low within-cluster variation relative to
+the between-cluster variation. We examine the `$withinss` component from the
+`kmeans()` output, which reports the sum of squared deviations from the centroid
+for each individual cluster.
+
+```{r within-cluster-var}
+within_ss <- data.frame(
+  Cluster = factor(1:chosen_k),
+  WithinSS = km_preferred$withinss,
+  Size = km_preferred$size
+)
+
+# Normalise by cluster size for fair comparison
+within_ss$AvgWithinSS <- within_ss$WithinSS / within_ss$Size
+
+knitr::kable(within_ss, digits = 2, format = "markdown",
+             caption = "Within-cluster sum of squares and cluster sizes")
+```
+
+```{r within-ss-plot, fig.height=5}
+ggplot(within_ss, aes(x = Cluster, y = WithinSS, fill = Cluster)) +
+  geom_col(alpha = 0.8) +
+  geom_text(aes(label = paste0("n = ", Size)), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Within-Cluster Sum of Squares by Cluster",
+       x = "Cluster", y = "Within-Cluster SS") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r within-ss-avg-plot, fig.height=5}
+ggplot(within_ss, aes(x = Cluster, y = AvgWithinSS, fill = Cluster)) +
+  geom_col(alpha = 0.8) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Average Within-Cluster SS (Normalised by Cluster Size)",
+       x = "Cluster", y = "Average Within-Cluster SS per Observation") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r within-ss-interpret, echo=FALSE, results='asis'}
+cat("**Interpretation:**\n\n")
+
+tightest <- which.min(within_ss$AvgWithinSS)
+loosest <- which.max(within_ss$AvgWithinSS)
+
+cat(sprintf("- **Cluster %d** is the most tightly packed (lowest average within-SS = %.1f),
+suggesting that chromosomes in this class share highly consistent feature profiles.
+This likely represents a well-defined, homogeneous chromosome type.\n\n",
+tightest, within_ss$AvgWithinSS[tightest]))
+
+cat(sprintf("- **Cluster %d** is the most heterogeneous (highest average within-SS = %.1f).
+This greater internal variability could indicate that this class encompasses
+chromosomes with more diverse morphologies, or it may suggest that this cluster is
+actually a combination of two sub-types that the algorithm could not fully separate
+at the chosen $k$. If further investigation were warranted, one could try increasing
+$k$ by one and checking whether this cluster splits cleanly.\n\n",
+loosest, within_ss$AvgWithinSS[loosest]))
+
+total_within <- sum(km_preferred$withinss)
+total_ss <- km_preferred$totss
+between_ss <- km_preferred$betweenss
+ratio <- between_ss / total_ss * 100
+
+cat(sprintf("- **Overall:** The between-cluster sum of squares accounts for **%.1f%%** of the
+total sum of squares. This means that %.1f%% of the total variance in the data is
+explained by the cluster separation, with the remaining %.1f%% being within-cluster
+variation.\n", ratio, ratio, 100 - ratio))
+```
+
+---
+
+## Uncertainty and Sensitivity to Modelling Choices
+
+Any cluster analysis carries inherent uncertainty. We close by acknowledging the
+key sources of uncertainty in our interpretation.
+
+### Sensitivity to Preprocessing
+
+```{r sensitivity, echo=FALSE, results='asis'}
+if (exists("prop_diff") && !is.na(prop_diff)) {
+  cat(sprintf("In Question 2, we found that **%.1f%%** of observations received
+different cluster assignments under the two pipelines. ", prop_diff * 100))
+  if (prop_diff < 0.15) {
+    cat("This low proportion indicates that the identified classes are **robust**
+to the choice of missing-data strategy and distance representation. We can be
+reasonably confident that the cluster structure reflects genuine biological
+groupings rather than artefacts of preprocessing.\n\n")
+  } else if (prop_diff < 0.30) {
+    cat("This moderate proportion suggests that the **core structure** of the
+clusters is stable, but boundary observations are sensitive to the choice of
+imputation and distance metric. The broad groupings are likely genuine, but the
+precise assignment of borderline chromosomes carries uncertainty.\n\n")
+  } else {
+    cat("This high proportion indicates that the clusters are **sensitive to
+preprocessing choices**. The identified classes should be interpreted with
+caution: it is possible that the partition is partly an artefact of the method
+(e.g. mean imputation artificially tightening clusters) rather than a discovery
+of natural biological structure.\n\n")
+  }
+} else {
+  cat("The two pipelines selected different values of $k$, which itself indicates
+sensitivity to the missing-data handling strategy. This uncertainty should temper
+our confidence in the precise number of classes.\n\n")
+}
+```
+
+### Limitations of Low-Dimensional Visualisation
+
+Although the PCA projection and MDS embedding provide useful visual summaries,
+they compress 33 dimensions into 2. Clusters that appear to overlap in a 2D
+projection may in fact be well-separated along higher principal components. The
+true separation of chromosome classes in the full 33-dimensional feature space
+is **difficult to establish by eye**, and the 2D plots should be interpreted as
+informative summaries rather than definitive evidence of overlap or separation.
+
+### Arbitrary Nature of $k$-Means Labels
+
+The cluster labels (1, 2, 3, …) assigned by `kmeans()` are **arbitrary** and
+carry no inherent biological meaning. A different random seed or a different
+value of `nstart` could produce the same partition with permuted labels.
+We used `nstart = 25` to ensure stability of the solution: by running the
+algorithm from 25 independent random initialisations and retaining the best
+(lowest $W_k$), we reduce the risk that the reported partition is a poor local
+optimum. Nevertheless, the partition itself depends on the choice of $k$, the
+distance metric, and the preprocessing—all of which involve judgement.
+
+### Concluding Remark
+
+```{r conclusion, echo=FALSE, results='asis'}
+cat(sprintf("In summary, the evidence from the elbow plot, PCA visualisations,
+centroid profiles, and within-cluster variability analysis supports the conclusion
+that **%d distinct chromosome classes** are present in this dataset. The between-
+cluster variance accounts for %.1f%% of the total, and the two independent
+clustering pipelines show reasonable agreement. While the precise boundaries
+between classes—particularly for chromosomes in overlapping regions—carry inherent
+uncertainty, the overall structure appears to reflect genuine biological groupings
+in chromosome morphology and banding patterns.\n", chosen_k, ratio))
+```

@@ -19,7 +19,8 @@ library(naniar)
 library(corrplot)
 library(factoextra)
 library(GGally)
-
+library(patchwork)
+library(viridis)
 ```
 
 #### Sampling Protocol
@@ -275,7 +276,7 @@ cat("PCs to reach 90% variance:", which(cum_var >= 90)[1], "\n")
 
 Although to reach a larger cumulative variance amount we may need 10+ clusters, for analytical purposes we may be able to get away with 3-7 clusters in practice. This seems to retain the dominant biological structure of the chromosomes without over-fitting for noise.
 
-#### Score scatterplot 
+#### Score scatterplot
 
 We use score scatterplots (Plotting PC1 against PC2) as further graphical evidence for cluster structure.
 
@@ -334,4 +335,573 @@ knitr::kable(loadings_PC5, digits = 3,
     bootstrap_options = c("striped", "hover", "condensed"),
     full_width = FALSE
   )
+
+
+k <- 5
+max_abs_loading <- apply(abs(pca_result$rotation[, 1:k]), 1, max)
+low_load_vars <- names(max_abs_loading[max_abs_loading < 0.15])
+cat("Variables with max |loading| < 0.15 across first", k, "PCs:\n")
+cat(paste(low_load_vars, collapse = ", "), "\n")
+
 ```
+
+We find that PC1 has 16 variables that exceed the threshold, so a large number of variables drive the principle component. On the other hand, PC2 has 11 variables above the threshold, but unlike PC1, PC22 is highly dominated by V26 at more than 15% contribution. This means that PC2 is much more concentrated, with a less variables being the key drivers to the principle component.
+
+Finally, we have two variables with a max loading under 0.15 for the first 5 principle components. These variables contribute very little to any of the first 5 principle components, so could be the first candidates for removal.
+
+### Identifying Uninformative or Anomalous Variables
+
+#### Near Zero Variance Variables
+
+```{r}
+var_vec <- chromo_na_dropped %>% summarise(across(everything(), var)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "variance") %>%
+  arrange(variance)
+
+median_var <- median(var_vec$variance)
+nzv_threshold <- 0.01 * median_var
+
+nzv_vars <- var_vec %>% filter(variance < nzv_threshold)
+
+knitr::kable(var_vec, digits = 2,
+             caption = "Variance of each variable (ascending)") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+
+
+if (nrow(nzv_vars) > 0) {
+  cat("Near-zero variance variables (< 1% of median variance):\n")
+  print(nzv_vars)
+} else {
+  cat("No near-zero variance variables detected.\n")
+}
+```
+
+We flag V29-V33 as near-zero variance, making them very strong candidates for removal. That being said, these were initial flagged for having much smaller intervals than the rest of our variables, which would heavily affect variance without standardisation.
+
+However, during PCA, where we do standardise, we still find these variables towards the bottom of the loadings during PC1 and PC2, in particular V29 and V31, although some variables contribute a small but potentially significant amount of variance during PC4-5 (above 0.1).
+
+I have chosen here to be conservative, and keep in some of these variables. While PCA and our correlation analysis identified them as uninformative, PCA by method down weights low-information variables. To add to this, the nature of the data (interval, mean, median etc), is vastly different from the rest of the variables, and so I have reason to suspect that these variables may be banding pattern information. As a result we only choose to discard V29 and V31, those who had near-zero variance as well as PCA loadings under 0.15 for the first 5 PCAs.
+
+```{r}
+candidates <- list(
+  near_zero_var    = if (nrow(nzv_vars) > 0) nzv_vars$variable else character(0),
+  low_pca_loading  = low_load_vars
+)
+
+cat("Candidates for removal:\n")
+print(candidates)
+
+# Variables flagged by ≥ 2 diagnostics are strong removal candidates
+all_candidates <- unlist(candidates)
+if (length(all_candidates) > 0) {
+  freq <- table(all_candidates)
+  cat("\nVariables flagged by ≥ 2 diagnostics:\n")
+  print(freq[freq >= 2])
+} else {
+  cat("\nNo variables flagged by multiple diagnostics.\n")
+}
+
+# Apply removal (adjust as needed based on your specific seed/sample)
+vars_to_remove <- unique(all_candidates[duplicated(all_candidates)])
+if (length(vars_to_remove) > 0) {
+  cat("\nRemoving:", paste(vars_to_remove, collapse = ", "), "\n")
+  chromo_clean <- chromo %>% select(-all_of(vars_to_remove))
+} else {
+  cat("\nNo variables meet the multi-diagnostic removal criterion.",
+      "Retaining all variables.\n")
+  chromo_clean <- chromo
+}
+```
+
+#### Outlier detection via Modified Z-scores (MAD)
+
+```{r}
+modified_z <- chromo_na_dropped %>%
+  mutate(across(everything(), ~ {
+    med <- median(., na.rm = TRUE)
+    mad_val <- mad(., constant = 1, na.rm = TRUE)
+    if (mad_val == 0) rep(0, length(.)) else 0.6745 * (. - med) / mad_val
+  }))
+
+outlier_counts <- modified_z %>%
+  summarise(across(everything(), ~ sum(abs(.) > 3.5))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_outliers") %>%
+  arrange(desc(n_outliers))
+
+knitr::kable(outlier_counts, caption = "Number of outliers per variable (|Modified Z| > 3.5)") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+```{r}
+obs_outlier <- rowSums(abs(modified_z) > 3.5)
+
+ggplot(data.frame(n_outlier_flags = obs_outlier), aes(x = n_outlier_flags)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", colour = "black") +
+  labs(title = "Distribution of Outlier Flags per Observation",
+       subtitle = "Based on Modified Z-scores with threshold |M| > 3.5",
+       x = "Number of Variables Flagged as Outlier",
+       y = "Observation Count") +
+  theme_minimal()
+
+```
+
+We find some isolated outliers within our variables. However, these are consistent with biological distributions, which may exhibit some heavy-tail properties. We check for outliers across multiple variables, and find that only 1 outlier sits across 2 or more variables. As a result, I find no evidence of outliers and no reason to remove any observations across the dataset.
+
+#### Scaling Justification
+
+```{r}
+chromo_clean_na_dropped <- chromo_clean %>% drop_na()
+
+# Raw variances
+raw_var <- apply(chromo_clean_na_dropped, 2, var)
+
+# Scaled variances (should all be 1)
+scaled_data <- scale(chromo_clean_na_dropped)
+scaled_var <- apply(scaled_data, 2, var)
+
+var_comp <- data.frame(
+  variable = names(raw_var),
+  raw_variance = raw_var,
+  scaled_variance = scaled_var
+)
+
+p1 <- ggplot(var_comp, aes(x = reorder(variable, -raw_variance), y = raw_variance)) +
+  geom_col(fill = "steelblue") +
+  labs(title = "Raw Variances", x = NULL, y = "Variance") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
+
+p2 <- ggplot(var_comp, aes(x = reorder(variable, -raw_variance), y = scaled_variance)) +
+  geom_col(fill = "darkgreen") +
+  labs(title = "Variances After Standardisation", x = NULL, y = "Variance") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
+
+p1 / p2
+
+```
+
+```{r}
+cat("Rat4io of max to min raw variance:",
+    round(max(raw_var) / min(raw_var), 1), "\n")
+```
+
+The ratio of the largest to smallest raw variance is substantial (reported above). Without standardisation, PCA would effectively become a summary of the highest- variance features alone, and k-means would partition the data based disproportionately on those same features.
+
+We therefore choose to standardise all variables to zero mean and unit variance before any subsequent clustering analysis.
+
+## Question 2 - Cluster Structure and Comparison
+
+### Standard Euclidian Route
+
+#### Missingness handling
+
+In our EDA, we saw that missingness was scattered rather than concentrated. This means that column-mean imputation would lead to minor distortion. As well as this, Casewise deletion under random missingness can lead to a large number of rows, and thus a large fraction of the sample deleted. For k-means clustering, loosing observations would be more damaging than a reduction in variance, as it is less data from which to learn the clustering.
+
+As a result, we choose column-mean imputation, as it would have the a mitigated negative affect on the data compared to casewise deletion.
+
+```{r}
+chromo_imputed <- chromo_clean
+for (j in seq_len(ncol(chromo_imputed))) {
+  na_idx <- is.na(chromo_imputed[[j]])
+  if (any(na_idx)) {
+    chromo_imputed[[j]][na_idx] <- mean(chromo_imputed[[j]], na.rm = TRUE)
+  }
+}
+cat("Remaining NAs after imputation:", sum(is.na(chromo_imputed)), "\n")
+cat("Sample size retained:", nrow(chromo_imputed), "\n")
+
+# Standardise to zero mean, unit variance (justified in Section 5)
+chromo_scaled <- as.data.frame(scale(chromo_imputed))
+```
+
+#### Running k-means
+
+```{r}
+set.seed(270)
+
+k_range <- 2:7
+wss_A <- numeric(length(k_range))
+km_list_A <- list()
+
+for (i in seq_along(k_range)) {
+  km <- kmeans(chromo_scaled, centers = k_range[i], nstart = 25, iter.max = 100)
+  wss_A[i] <- km$tot.withinss
+  km_list_A[[i]] <- km
+}
+
+elbow_A <- data.frame(k = k_range, WSS = wss_A)
+```
+
+#### Elbow plot
+
+```{r}
+ggplot(elbow_A, aes(x = k, y = WSS)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 3) +
+  scale_x_continuous(breaks = k_range) +
+  labs(title = "Elbow Plot – Standard Euclidean Route",
+       x = "Number of Clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WSS)") +
+  theme_minimal()
+
+# Tabulate marginal decreases to help locate the elbow
+elbow_A$decrease <- c(NA, -diff(elbow_A$WSS))
+elbow_A$pct_decrease <- c(NA, round(-diff(elbow_A$WSS) / head(elbow_A$WSS, -1) * 100, 2))
+knitr::kable(elbow_A, digits = 2, format = "markdown",
+             caption = "WSS and marginal decrease per k (Standard Euclidean)")
+```
+
+Unfortunately, there's not a clear K selection in this case, with the graph appearing smooth and continuously declining, so the data may not have strong cluster boundaries.
+
+We show the graph of the percentage point decrease per k, and use this to help us select. We could select k=3, due to an extra k only improving WSS by roughly 10%.
+
+However, K=4 provides the last practically meaningful improvement, before marginal and potential unimportant differences. As well as this, during our PC1-PC2 projection in our EDA, the data seemed to be grouped into 4 clusters, rather than 3 intuitively.
+
+#### Cluster Visualisation via PCA
+
+```{r}
+k_A <-4
+
+km_A <- km_list_A[[which(k_range == k_A)]]
+
+fviz_cluster(km_A, data = chromo_scaled,
+             geom = "point",
+             pointsize = 1.5,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = paste0("Standard Euclidean Clusters (k = ", k_A,
+                           ") – PCA Projection"))
+```
+
+### Observed Only Normalised Distance Route
+
+#### Embed and Run the k-means
+
+We compute the renormalised euclidean distance, embed with a classical (metric) MDS as we did in the lectures/labs with 2D embedding, and run the k-means.
+
+```{r}
+# Scale without imputing: scale() on columns, NA propagated
+chromo_scaled_raw <- as.data.frame(scale(chromo_clean))
+X <- as.matrix(chromo_scaled_raw)
+n <- nrow(X)
+p <- ncol(X)
+
+# Compute the n x n renormalised distance matrix
+dist_mat <- matrix(0, nrow = n, ncol = n)
+
+for (i in 1:(n - 1)) {
+  for (j in (i + 1):n) {
+    # Identify coordinates observed in BOTH rows
+    obs_both <- which(!is.na(X[i, ]) & !is.na(X[j, ]))
+    n_obs <- length(obs_both)
+    if (n_obs > 0) {
+      partial_ss <- sum((X[i, obs_both] - X[j, obs_both])^2)
+      dist_mat[i, j] <- sqrt(p / n_obs * partial_ss)
+    } else {
+      dist_mat[i, j] <- NA
+    }
+    dist_mat[j, i] <- dist_mat[i, j]
+  }
+}
+
+# Report any pairs with zero shared observations
+n_na_pairs <- sum(is.na(dist_mat[upper.tri(dist_mat)]))
+cat("Observation pairs with no shared variables:", n_na_pairs, "\n")
+
+# Handle any NA distances by substituting the median distance
+if (n_na_pairs > 0) {
+  med_dist <- median(dist_mat, na.rm = TRUE)
+  dist_mat[is.na(dist_mat)] <- med_dist
+  cat("Replaced with median distance:", round(med_dist, 3), "\n")
+}
+
+dist_obj <- as.dist(dist_mat)
+```
+
+```{r}
+mds_result <- cmdscale(dist_obj, k = 2, eig = TRUE)
+mds_coords <- mds_result$points
+colnames(mds_coords) <- c("MDS1", "MDS2")
+
+# Goodness-of-fit: proportion of variance explained by the 2D embedding
+mds_eig <- mds_result$eig
+mds_var_explained <- sum(mds_eig[1:2]) / sum(abs(mds_eig)) * 100
+cat(sprintf("Variance explained by 2D MDS embedding: %.1f%%\n", mds_var_explained))
+```
+
+```{r}
+set.seed(270)
+
+wss_B <- numeric(length(k_range))
+km_list_B <- list()
+
+for (i in seq_along(k_range)) {
+  km <- kmeans(mds_coords, centers = k_range[i], nstart = 25, iter.max = 100)
+  wss_B[i] <- km$tot.withinss
+  km_list_B[[i]] <- km
+}
+
+elbow_B <- data.frame(k = k_range, WSS = wss_B)
+```
+
+#### Elbow Plot
+
+```{r}
+ggplot(elbow_B, aes(x = k, y = WSS)) +
+  geom_line(colour = "steelblue", linewidth = 1) +
+  geom_point(colour = "steelblue", size = 3) +
+  scale_x_continuous(breaks = k_range) +
+  labs(title = "Elbow Plot – Observed-Only Distance Route (MDS)",
+       x = "Number of Clusters (k)",
+       y = "Total Within-Cluster Sum of Squares (WSS)") +
+  theme_minimal()
+
+elbow_B$decrease <- c(NA, -diff(elbow_B$WSS))
+elbow_B$pct_decrease <- c(NA, round(-diff(elbow_B$WSS) / head(elbow_B$WSS, -1) * 100, 2))
+knitr::kable(elbow_B, digits = 2, format = "markdown",
+             caption = "WSS and marginal decrease per k (Observed-Only MDS)") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+We choose k = 4, as from k = 4-\>5, we see the curve start to flatten noticable. Beyond this point, clusters will yield diminishing results, and could just be partitioning existing structures instead of capturing new groupings.
+
+```{r}
+k_B <- 4
+km_B <- km_list_B[[which(k_range == k_B)]]
+
+mds_df <- as.data.frame(mds_coords)
+mds_df$cluster <- factor(km_B$cluster)
+
+ggplot(mds_df, aes(x = MDS1, y = MDS2, colour = cluster)) +
+  geom_point(alpha = 0.6, size = 2) +
+  stat_ellipse(level = 0.68, linewidth = 0.8, linetype = "dashed") +
+  labs(title = paste0("Observed-Only Route Clusters (k = ", k_B,
+                      ") in MDS Space"),
+       x = "MDS Dimension 1", y = "MDS Dimension 2",
+       colour = "Cluster") +
+  theme_minimal()
+```
+
+### Comparison of the Two Clusterings
+
+We cross-tabulate the two cluster vectors to see which labels from Route A most frequently co-occur with which labels from Route B. We then calculate the proportion of differing assignments using the logic from the labs (where different rankings are compared for stability), we count mismatches and divide by n.
+
+```{r}
+
+labels_A <- km_A$cluster   # from Standard Euclidean Route
+labels_B <- km_B$cluster   # from Observed-Only Distance Route
+
+cat("Length of Euclidean cluster vector:", length(labels_A), "\n")
+cat("Length of Observed-Only cluster vector:", length(labels_B), "\n")
+cross_tbl <- table(Euclidean = labels_A, ObservedOnly = labels_B)
+knitr::kable(cross_tbl, format = "markdown",
+             caption = "Cross-tabulation of cluster assignments (raw labels)") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+```{r}
+if (k_A == k_B) {
+  # The proportion of observations where the aligned labels disagree
+  prop_diff <- mean(labels_A != labels_B)
+  n_diff <- sum(labels_A != labels_B)
+  n_total <- length(labels_A)
+  
+  cat(sprintf("Number of differing assignments: %d / %d\n", n_diff, n_total))
+  cat(sprintf("Proportion of differing assignments: %.4f (%.1f%%)\n",
+              prop_diff, prop_diff * 100))
+} else {
+  cat("Direct proportion not computed (different k values selected).\n")
+}
+```
+
+As you can see, there is a very low level of differing assignments, at 4%. As well as this, both routes identify the same optimal k, indicating that this is the correct k to identify a genuine structure. The low level of differing assignments indicates that boundary choices are flipping between clusters, and the cluster choices are meaningful and stable. We seem to have identified actually biological groupings in the features, and not just noise or an artefact from a processing choices.
+
+#### Reasons for possible differences
+
+Although we did not have large differences, the clusters still had mild variations between the two methods. These can be caused by a couple of reasons:
+
+-   Choices in preprocessing: For example, when we handled missing data by imputing using the mean, we artificially strengthened the correlation between variables. The side affect of this is it can produce tighter clusters, for us in the euclidean route over the observed-only route.
+
+-   Method differences: The euclidean route clusters are created via PCA, which aims to maximise variance through a linear projection. On the other hand, the observed-only route clusters in an MDS space, focusing on preserving pairwise differences. The difference in the aim of both methods can lead to small changes, leading to k-means drawing mildly different boundaries.
+
+## Question 3 - Cluster Interpretation
+
+We select our preferred pipleline, euclidean.
+
+```{r}
+preferred <- "euclidean"
+
+km_preferred <- km_A
+data_preferred <- chromo_scaled
+k <- k_A
+
+```
+
+#### Constructing cluster prototypes
+
+```{r}
+centroids <- as.data.frame(km_preferred$centers)
+centroids$Cluster <- factor(1:k)
+
+# Display the centroid matrix
+centroids_display <- centroids %>% select(Cluster, everything())
+knitr::kable(centroids_display, digits = 2, format = "markdown",
+             caption = "Cluster centroids (standardised scale)")  %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+Each column represents one of the 33 features (on the standardised scale). Large positive values indicate that the cluster prototype scores well above the global mean on that feature while large negative values indicate the opposite. We can visualise this with a heatmap.
+
+```{r}
+centroids_long <- centroids %>%
+  pivot_longer(-Cluster, names_to = "Variable", values_to = "Value")
+
+ggplot(centroids_long, aes(x = Variable, y = Cluster, fill = Value)) +
+  geom_tile(colour = "white") +
+  scale_fill_viridis() +
+  labs(title = "Cluster Centroid Heatmap (Standardised Values)",
+       x = "Variable", y = "Cluster", fill = "Std. Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+```
+
+Rows with strikingly different colour profiles represent well-separated chromosome classes while rows with similar profiles suggest classes that may be harder to distinguish. We find that cluster 4 is the most well separated, while the other classes still have distinguishable separation.
+
+#### Visualising cluster differences
+
+```{r}
+fviz_cluster(km_preferred, data = data_preferred,
+             geom = "point",
+             pointsize = 1.5,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = paste0("Preferred Clustering (k = ", k,
+                           ") – PCA Projection with Convex Hulls"))
+```
+
+We find that clusters are not well separated in the PC1-PC2 plane, due to overlapping convex hulls. Where hulls overlap, the clusters may still be separable along higher principal components—the 2D projection can obscure genuine separation in the full 33-dimensional space.
+
+We use boxplots to examine the distribution within each cluster. We focus on variables that PCA loadings suggest are the most discriminating.
+
+```{r}
+centroids_numeric <- centroids %>% select(-Cluster)
+centroid_spreads <- apply(centroids_numeric, 2, function(x) diff(range(x)))
+top_vars <- names(sort(centroid_spreads, decreasing = TRUE))[1:min(6, ncol(centroids_numeric))]
+cat("Top discriminating variables (by centroid spread):\n")
+cat(paste(top_vars, collapse = ", "), "\n")
+```
+
+```{r}
+box_data <- as.data.frame(data_preferred)
+box_data$Cluster <- factor(km_preferred$cluster)
+
+box_long <- box_data %>%
+  select(Cluster, all_of(top_vars)) %>%
+  pivot_longer(-Cluster, names_to = "Variable", values_to = "Value") %>%
+  mutate(Variable = factor(Variable, levels = top_vars))
+
+ggplot(box_long, aes(x = Cluster, y = Value, fill = Cluster)) +
+  geom_boxplot(outlier.size = 1, alpha = 0.7) +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 3) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Distribution of Top Discriminating Variables by Cluster",
+       x = "Cluster", y = "Standardised Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+We have a couple of interesting outcomes:
+
+-   Cluster 1 (red) — consistently low values across V2, V1, V4, V28 but high on V10. This cluster has a very distinct and consistent profile with tight boxes and few outliers, suggesting it is the most internally cohesive group.
+
+-   Cluster 2 (blue) — sits around zero or slightly above for most variables, moderate V10 values, and notably high V11. Represents a middle ground morphologically.
+
+-   Cluster 3 (green) — moderate positive values on V2, V1, V4, V28 but negative on V10 and V11. Shows an opposing profile to Cluster 1, consistent with the negative correlations we identified earlier between variable groups.
+
+-   Cluster 4 (purple) — highest values on V2, V1, V4, V28 and most negative on V10, V11. Represents the extreme opposite of Cluster 1.
+
+#### Number of Chromosome Classes
+
+I think there are 4 chromosome classes, because of these points throughout our analysis:
+
+-   Agreement throughout the different methods — two completely different analytical approaches (Euclidean and MDS) both independently pointed to k=4 as the best number of clusters, and assigned 96% of chromosomes to the same group.
+
+-   Group profiles — looking at the boxplots, each cluster has a distinctly different pattern across the key measurements. Cluster 1 is consistently low on some features and high on others, while Cluster 4 is the complete opposite, with Clusters 2 and 3 sitting in between. This suggests 4 classes, although it could suggest one class with a continuous distribution.
+
+-   The PCA plot visually suggested four groups visually.
+
+-   Adding more than 4 clusters stopped being useful — beyond k=4, each additional cluster only marginally provided improvements meaning extra clusters could just be artificially splitting existing groups rather than finding new genuine structure in the data.
+
+#### Within cluster variability
+
+```{r}
+within_ss <- data.frame(
+  Cluster = factor(1:k),
+  WithinSS = km_preferred$withinss,
+  Size = km_preferred$size
+)
+
+# Normalise by cluster size for fair comparison
+within_ss$AvgWithinSS <- within_ss$WithinSS / within_ss$Size
+
+knitr::kable(within_ss, digits = 2, format = "markdown",
+             caption = "Within-cluster sum of squares and cluster sizes")  %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+```
+
+```{r}
+ggplot(within_ss, aes(x = Cluster, y = WithinSS, fill = Cluster)) +
+  geom_col(alpha = 0.8) +
+  geom_text(aes(label = paste0("n = ", Size)), vjust = -0.5, size = 3.5) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Within-Cluster Sum of Squares by Cluster",
+       x = "Cluster", y = "Within-Cluster SS") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+ggplot(within_ss, aes(x = Cluster, y = AvgWithinSS, fill = Cluster)) +
+  geom_col(alpha = 0.8) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Average Within-Cluster SS (Normalised by Cluster Size)",
+       x = "Cluster", y = "Average Within-Cluster SS per Observation") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+-   Cluster 1 appears much more spread out than the others in our first graph, but this is simply because it contains nearly twice as many observations (210 vs 113–143).
+
+-   Therefore we decide to normalise by cluster. WSS is divided by the number of observations in each cluster leading to all four clusters show very similar average spread (\~15–17 per observation), meaning no cluster is dramatically tighter or looser than the others.
+
+-   All clusters are of comparable quality — the similarity in normalised WSS suggests k-means hasn't created one artificially tight cluster while leaving others sprawling, which would be a sign of a poor clustering solution. These results help us justifyk=4 decisionas there is good and equal internal cohesion across clusters.
+
+#### **Uncertainty and Sensitivity to Modelling Choices**
+
+In Question 2, we found that only 4.0**%** of observations received different cluster assignments under the two pipelines. This low proportion indicates that the identified classes are robust to the choice of missing-data strategy and distance representation. We can be reasonably confident that the cluster structure reflects genuine biological groupings rather than artefacts of preprocessing.
+
+Although the PCA projection and MDS embedding provide useful visual summaries, they compress 33 dimensions into 2. Clusters that appear to overlap in the 2D projection may in fact be well-separated along higher principal components. Our PCA analysis required 10 components to reach 80% variance, meaning a large proportion of structure is invisible in any 2D plot. Therefore, the 2D plots should be interpreted as informative summaries rather than definitive evidence of overlap or separation.
+
+The cluster labels (1, 2, 3, 4) assigned by `kmeans()` are arbitrary and carry no inherent biological meaning. We used `nstart = 25` to ensure stability of the solution, reducing the risk of a poor local optimum. That being said, the partition depends on the choice of k, the distance metric, and the preprocessing all relying on human error and judgement. The gradient structure observed across clusters (Cluster 1 being the polar opposite of Cluster 4) may suggest that these are not 4 distinct classes, but rather points across a continuous class.
