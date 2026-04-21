@@ -1,0 +1,54 @@
+Linear Models for Regression and Classification
+Simple and Multiple Linear Regression: Models the relationship between inputs and a continuous response using least squares estimation.
+Logistic Regression: A discriminative model for binary classification that directly estimates the posterior probability of a class.
+Multinomial Regression (Softmax Regression): An extension of logistic regression for non-binary classification problems with three or more classes.
+Linear Discriminant Analysis (LDA): A generative classifier that assumes each class has a multivariate Gaussian distribution with a shared covariance matrix, resulting in linear decision boundaries.
+Quadratic Discriminant Analysis (QDA): Similar to LDA but allows each class to have its own covariance matrix, leading to quadratic decision boundaries.
+Naive Bayes: A generative model that assumes predictors are conditionally independent given the class, which reduces a high-dimensional estimation problem into multiple univariate ones.
+k-Nearest Neighbors (kNN): A non-parametric method used for both regression and classification that makes predictions based on the K closest training points.
+Linear Model Selection and Regularization
+Subset Selection: Includes Best Subset Selection, Forward Stepwise Selection, and Backward Stepwise Selection to identify the most relevant predictors.
+Shrinkage Methods (Regularization):
+Ridge Regression: Applies an L2 penalty to shrink coefficients toward zero to reduce variance.
+The Lasso: Applies an L1 penalty that can shrink some coefficients exactly to zero, effectively performing automatic variable selection.
+Dimension Reduction Methods:
+Principal Components Regression (PCR): Uses the first M principal components of the predictors to fit a linear regression model.
+Partial Least Squares (PLS): A supervised alternative to PCR that identifies new features that both explain the predictors and are related to the response.
+Moving Beyond Linearity
+Polynomial Regression: Extends the linear model by including powers of the predictors (e.g., X 
+2
+ ,X 
+3
+ ).
+Step Functions: Breaks the range of a predictor into bins and fits a different constant in each bin.
+Regression Splines: Uses piecewise polynomials joined at points called knots; includes B-splines and Natural Splines.
+Smoothing Splines: A flexible approach that fits a spline while penalizing roughness to balance fit and smoothness.
+Local Regression: Fits linear models locally by using weighted least squares, where weights decrease as distance from the target point increases.
+Generalized Additive Models (GAMs): A general framework for extending linear models by allowing non-linear functions of each predictor while maintaining additivity.
+Gaussian Processes: A powerful non-parametric regression technique that assumes a prior distribution over functions.
+Tree-Based and Ensemble Methods
+Decision Trees (CART): Non-parametric models that partition the feature space into rectangles using successive binary splits.
+Bagging (Bootstrap Aggregation): Reduces the variance of high-variance models (like trees) by averaging multiple models fit on bootstrap samples.
+Random Forests: An extension of bagging that decorrelates trees by considering only a random subset of features at each split.
+Boosting: A sequential ensemble method where each new model learns from the errors of the previous ones. Specific implementations include AdaBoost and Gradient Tree Boosting.
+Bayesian Additive Regression Trees (BART): A Bayesian approach to tree ensembles that perturbs trees successively to explore the model space.
+Support Vector Machines (SVM)
+Maximal Margin Classifier: A simple classifier that finds the hyperplane that is farthest from the training observations.
+Support Vector Classifier: An extension that allows for some observations to be on the wrong side of the margin or hyperplane.
+Support Vector Machines: Uses the "kernel trick" (e.g., Radial or Polynomial kernels) to accommodate non-linear class boundaries in a high-dimensional feature space.
+Deep Learning
+Single and Multilayer Perceptrons (MLP): Feed-forward neural networks that learn non-linear feature extractions through hidden layers and activation functions like ReLU or Sigmoid.
+Convolutional Neural Networks (CNN): Specialized architectures designed for data with spatial structure, such as images.
+Recurrent Neural Networks (RNN): Designed for sequential data; includes variations like LSTM.
+Transformers: Modern architectures used for sequence processing, particularly in document classification and translation.
+Survival Analysis
+Kaplan-Meier Estimator: A non-parametric method for estimating the survival curve from censored data.
+Cox’s Proportional Hazards Model: A regression approach that models the hazard function as a function of covariates without specifying the baseline hazard.
+Survival Trees and Random Survival Forests: Extensions of tree-based methods adapted for survival response data.
+Unsupervised Learning
+Principal Components Analysis (PCA): A fundamental tool for dimension reduction and data visualization.
+Clustering Methods:
+K-Means Clustering: Partitions data into K distinct, non-overlapping clusters.
+Hierarchical Clustering: Creates a dendrogram of clusters without pre-specifying the number of clusters.
+Matrix Completion: Uses techniques like PCA to fill in missing values in a data matrix.
+Manifold Learning: Includes techniques like Isomap, Local Linear Embedding (LLE), and t-SNE for non-linear dimensionality reduction.
