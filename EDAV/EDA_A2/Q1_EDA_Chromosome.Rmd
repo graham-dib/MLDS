@@ -12,6 +12,9 @@ output:
     code_folding: show
     fig_width: 10
     fig_height: 7
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -25,10 +28,10 @@ knitr::opts_chunk$set(
 
 # Preamble: Libraries and Data Loading
 
-We begin by loading the packages required for the analysis. Each serves a specific
-purpose: `naniar` for principled missing-data diagnostics, `corrplot` for
-correlation visualisation, `ggplot2` and `patchwork` for layered graphics, and
-`factoextra` for PCA extraction utilities.
+We begin by loading the packages required for the analysis. Each serves
+a specific purpose: `naniar` for principled missing-data diagnostics,
+`corrplot` for correlation visualisation, `ggplot2` and `patchwork` for
+layered graphics, and `factoextra` for PCA extraction utilities.
 
 ```{r libraries}
 library(tidyverse)
@@ -47,9 +50,10 @@ chromo_full <- read.csv("chromosome_data.csv")
 
 ## Sampling Protocol
 
-The coursework mandates a reproducible subsample of 600 rows drawn without
-replacement. The random seed is set to the **last three digits of the student's
-College ID**. All downstream analysis is conducted exclusively on this subsample.
+The coursework mandates a reproducible subsample of 600 rows drawn
+without replacement. The random seed is set to the **last three digits
+of the student's College ID**. All downstream analysis is conducted
+exclusively on this subsample.
 
 ```{r sampling}
 # ──────────────────────────────────────────────────
@@ -69,9 +73,10 @@ cat("Sampled dataset dimensions:", nrow(chromo), "rows ×", ncol(chromo), "colum
 str(chromo, list.len = 35)
 ```
 
-All 33 variables (`V1`–`V33`) are numeric, which is consistent with quantitative
-features extracted from karyogram image analysis (capturing chromosome size, shape,
-and banding patterns). No categorical or character columns are present.
+All 33 variables (`V1`–`V33`) are numeric, which is consistent with
+quantitative features extracted from karyogram image analysis (capturing
+chromosome size, shape, and banding patterns). No categorical or
+character columns are present.
 
 ## Quick Peek at the Data
 
@@ -82,9 +87,10 @@ tail(chromo, 5)
 
 ## Summary Statistics
 
-We examine the five-number summary plus the mean for every variable to understand
-the **scales** on which the features are reported. If scales differ by orders of
-magnitude, this will have direct implications for distance-based methods later.
+We examine the five-number summary plus the mean for every variable to
+understand the **scales** on which the features are reported. If scales
+differ by orders of magnitude, this will have direct implications for
+distance-based methods later.
 
 ```{r summary-stats}
 summary(chromo)
@@ -110,21 +116,22 @@ knitr::kable(scale_tbl, digits = 2,
              caption = "Per-variable summary statistics, sorted by range (descending)")
 ```
 
-**Observation on scales.** The table above reveals that the numeric ranges of the
-33 variables differ substantially. Some variables span ranges in the hundreds
-(e.g. size-related features), while others are confined to single-digit intervals
-(e.g. banding-pattern ratios). This heterogeneity in scale is critical: any
-Euclidean-distance-based method (PCA on the covariance matrix, $k$-means
-clustering) will be **dominated by the high-variance features** unless we
-standardise. We revisit this formally in Section 5.
+**Observation on scales.** The table above reveals that the numeric
+ranges of the 33 variables differ substantially. Some variables span
+ranges in the hundreds (e.g. size-related features), while others are
+confined to single-digit intervals (e.g. banding-pattern ratios). This
+heterogeneity in scale is critical: any Euclidean-distance-based method
+(PCA on the covariance matrix, $k$-means clustering) will be **dominated
+by the high-variance features** unless we standardise. We revisit this
+formally in Section 5.
 
----
+------------------------------------------------------------------------
 
 # Quantifying and Visualising Missingness
 
-Missing data can distort multivariate structure and must be diagnosed before any
-imputation or removal decision is taken. We approach this in three stages:
-quantification, pattern analysis, and a removal decision.
+Missing data can distort multivariate structure and must be diagnosed
+before any imputation or removal decision is taken. We approach this in
+three stages: quantification, pattern analysis, and a removal decision.
 
 ## Per-Variable Missingness
 
@@ -145,9 +152,9 @@ ggplot(miss_summary, aes(x = reorder(variable, -pct_miss), y = pct_miss)) +
 
 ## Overall Missingness Map
 
-`vis_miss()` provides a rasterised overview of every cell in the dataset, making
-it easy to see whether missingness is concentrated in specific rows or spread
-uniformly.
+`vis_miss()` provides a rasterised overview of every cell in the
+dataset, making it easy to see whether missingness is concentrated in
+specific rows or spread uniformly.
 
 ```{r vis-miss, fig.height=8}
 vis_miss(chromo, sort_miss = TRUE) +
@@ -156,10 +163,10 @@ vis_miss(chromo, sort_miss = TRUE) +
 
 ## Patterns of Co-Missingness
 
-If two or more variables are *always* missing together, this may signal a shared
-extraction failure in the image pipeline (e.g. a measurement that depends on
-another measurement being successful). We use an UpSet plot to inspect whether
-missingness is **monotone** or **non-monotone**.
+If two or more variables are *always* missing together, this may signal
+a shared extraction failure in the image pipeline (e.g. a measurement
+that depends on another measurement being successful). We use an UpSet
+plot to inspect whether missingness is **monotone** or **non-monotone**.
 
 ```{r miss-upset, fig.height=6}
 # gg_miss_upset requires at least 2 variables with missing values
@@ -173,8 +180,9 @@ if (n_vars_with_miss >= 2) {
 
 ## Per-Observation Missingness
 
-We also check whether certain *observations* carry a disproportionate number of
-missing values—such rows may be unreliable and should be flagged.
+We also check whether certain *observations* carry a disproportionate
+number of missing values—such rows may be unreliable and should be
+flagged.
 
 ```{r miss-per-obs}
 obs_miss <- chromo %>%
@@ -204,21 +212,23 @@ cat("Variables with > 40% missing:",
 # after any variable removal decisions are finalised (see Section 4).
 ```
 
-If any variable exceeds a high missingness threshold (say 40 %), it provides too
-little information for reliable imputation and should be dropped. Variables with
-moderate missingness (< ~10 %) can be handled via complete-case analysis for PCA
-(which requires a complete numeric matrix), provided the missingness pattern is
-roughly **Missing Completely At Random (MCAR)**. The `vis_miss()` output above
-allows us to assess whether missingness appears systematic or scattered.
+If any variable exceeds a high missingness threshold (say 40 %), it
+provides too little information for reliable imputation and should be
+dropped. Variables with moderate missingness (\< \~10 %) can be handled
+via complete-case analysis for PCA (which requires a complete numeric
+matrix), provided the missingness pattern is roughly **Missing
+Completely At Random (MCAR)**. The `vis_miss()` output above allows us
+to assess whether missingness appears systematic or scattered.
 
----
+------------------------------------------------------------------------
 
 # Examining Multivariate Structure
 
 ## Correlation Analysis
 
-With 33 features, a correlation heatmap is the most efficient way to identify
-redundant (highly collinear) variables and natural groupings among features.
+With 33 features, a correlation heatmap is the most efficient way to
+identify redundant (highly collinear) variables and natural groupings
+among features.
 
 ```{r correlation, fig.height=9, fig.width=10}
 # Complete cases only for correlation computation
@@ -239,11 +249,12 @@ corrplot(cor_mat,
          mar      = c(0, 0, 2, 0))
 ```
 
-**Interpretation.** Variables that cluster into blocks of high positive correlation
-are measuring essentially the same latent attribute (e.g. overall chromosome
-length). Conversely, variables that are uncorrelated with everything else may
-capture unique banding-pattern information or may be artefacts. We will cross-
-reference these findings with the PCA loadings below.
+**Interpretation.** Variables that cluster into blocks of high positive
+correlation are measuring essentially the same latent attribute (e.g.
+overall chromosome length). Conversely, variables that are uncorrelated
+with everything else may capture unique banding-pattern information or
+may be artefacts. We will cross- reference these findings with the PCA
+loadings below.
 
 ```{r high-cor-pairs}
 # Identify pairs with |r| > 0.9
@@ -264,17 +275,19 @@ if (nrow(high_cor) > 0) {
 }
 ```
 
-Highly correlated pairs ($|r| > 0.9$) are essentially linearly redundant.
-Retaining both in a distance-based analysis inflates the influence of the latent
-factor they share, which motivates either dropping one member of each pair or,
-more elegantly, using PCA to combine them.
+Highly correlated pairs ($|r| > 0.9$) are essentially linearly
+redundant. Retaining both in a distance-based analysis inflates the
+influence of the latent factor they share, which motivates either
+dropping one member of each pair or, more elegantly, using PCA to
+combine them.
 
 ## Principal Components Analysis (PCA)
 
-PCA is the natural multivariate tool for a dataset of this width. We perform PCA
-on the **scaled** (unit-variance, zero-mean) complete-case data so that all
-variables contribute equally to the decomposition, regardless of their original
-measurement scale. (See Section 5 for the formal justification.)
+PCA is the natural multivariate tool for a dataset of this width. We
+perform PCA on the **scaled** (unit-variance, zero-mean) complete-case
+data so that all variables contribute equally to the decomposition,
+regardless of their original measurement scale. (See Section 5 for the
+formal justification.)
 
 ```{r pca}
 pca_result <- prcomp(chromo_cc, center = TRUE, scale. = TRUE)
@@ -282,9 +295,10 @@ pca_result <- prcomp(chromo_cc, center = TRUE, scale. = TRUE)
 
 ### Scree Plot: Choosing the Number of Components
 
-The scree plot shows the proportion of total variance explained by each successive
-principal component. An "elbow"—a point after which eigenvalues level off—indicates
-where additional components cease to contribute meaningful structure.
+The scree plot shows the proportion of total variance explained by each
+successive principal component. An "elbow"—a point after which
+eigenvalues level off—indicates where additional components cease to
+contribute meaningful structure.
 
 ```{r scree, fig.height=5}
 fviz_eig(pca_result,
@@ -315,9 +329,9 @@ cat("PCs to reach 90% variance:", which(cum_var >= 90)[1], "\n")
 
 ### Biplot: First Two Principal Components
 
-The projection onto PC1 vs PC2 is our first window into whether the data exhibits
-the **multimodal structure** we would expect if distinct chromosome classes are
-present.
+The projection onto PC1 vs PC2 is our first window into whether the data
+exhibits the **multimodal structure** we would expect if distinct
+chromosome classes are present.
 
 ```{r pca-biplot, fig.height=7, fig.width=9}
 fviz_pca_ind(pca_result,
@@ -339,16 +353,17 @@ ggplot(pca_scores, aes(x = PC3, y = PC4)) +
   theme_minimal()
 ```
 
-**Interpretation.** If we observe clearly separated clouds of points in these
-projections, each cloud likely corresponds to a distinct chromosome class. Overlap
-between clouds may indicate classes that are inherently similar in these feature
-spaces, or that higher-dimensional components are needed to separate them.
+**Interpretation.** If we observe clearly separated clouds of points in
+these projections, each cloud likely corresponds to a distinct
+chromosome class. Overlap between clouds may indicate classes that are
+inherently similar in these feature spaces, or that higher-dimensional
+components are needed to separate them.
 
 ### PCA Loadings
 
-The loadings reveal which original variables drive each component. Variables with
-near-zero loadings on the first several PCs contribute little discriminatory
-information and are candidates for removal.
+The loadings reveal which original variables drive each component.
+Variables with near-zero loadings on the first several PCs contribute
+little discriminatory information and are candidates for removal.
 
 ```{r loadings, fig.height=8}
 # Contributions of variables to PC1 and PC2
@@ -383,15 +398,15 @@ if (length(low_load_vars) > 0) {
 }
 ```
 
----
+------------------------------------------------------------------------
 
 # Identifying Uninformative or Anomalous Variables
 
 ## Near-Zero Variance Variables
 
-A variable with (near-)zero variance is constant across observations and provides
-no discriminatory power for clustering. We flag variables whose variance is below
-1 % of the median variance across all features.
+A variable with (near-)zero variance is constant across observations and
+provides no discriminatory power for clustering. We flag variables whose
+variance is below 1 % of the median variance across all features.
 
 ```{r nzv}
 var_vec <- chromo_cc %>% summarise(across(everything(), var)) %>%
@@ -416,17 +431,18 @@ if (nrow(nzv_vars) > 0) {
 
 ## Outlier Detection via Modified Z-Scores
 
-Classical $z$-scores are sensitive to the very outliers they attempt to detect
-(since both the mean and standard deviation are influenced by extreme values).
-A more robust approach uses the **median** and the **Median Absolute Deviation
-(MAD)**:
+Classical $z$-scores are sensitive to the very outliers they attempt to
+detect (since both the mean and standard deviation are influenced by
+extreme values). A more robust approach uses the **median** and the
+**Median Absolute Deviation (MAD)**:
 
 $$
 M_i = \frac{0.6745 \, (x_i - \widetilde{x})}{\text{MAD}}
 $$
 
-where $\widetilde{x}$ is the median and $\text{MAD} = \text{median}(|x_i - \widetilde{x}|)$.
-A common threshold is $|M_i| > 3.5$ (Iglewicz & Hoaglin, 1993).
+where $\widetilde{x}$ is the median and
+$\text{MAD} = \text{median}(|x_i - \widetilde{x}|)$. A common threshold
+is $|M_i| > 3.5$ (Iglewicz & Hoaglin, 1993).
 
 ```{r outliers}
 modified_z <- chromo_cc %>%
@@ -460,17 +476,18 @@ cat("Observations flagged as outliers on ≥ 5 variables:",
     sum(obs_outlier >= 5), "\n")
 ```
 
-**Decision.** Isolated outliers on one or two variables are consistent with heavy-
-tailed distributions common in biological measurement—they should be retained.
-Observations that are extreme on *many* variables simultaneously are more likely
-to be gross measurement errors (e.g. a corrupted image), and their removal should
-be considered on a case-by-case basis.
+**Decision.** Isolated outliers on one or two variables are consistent
+with heavy- tailed distributions common in biological measurement—they
+should be retained. Observations that are extreme on *many* variables
+simultaneously are more likely to be gross measurement errors (e.g. a
+corrupted image), and their removal should be considered on a
+case-by-case basis.
 
 ## Consolidating Variable Removal Decisions
 
-We synthesise evidence from the missingness analysis (Section 2), the near-zero
-variance check, the PCA loadings, and the correlation analysis to make a final
-decision about which variables to retain.
+We synthesise evidence from the missingness analysis (Section 2), the
+near-zero variance check, the PCA loadings, and the correlation analysis
+to make a final decision about which variables to retain.
 
 ```{r removal-decision}
 # Collect candidates from each diagnostic
@@ -505,33 +522,35 @@ if (length(vars_to_remove) > 0) {
 }
 ```
 
-*Note:* A conservative approach is appropriate here. We prefer to retain a variable
-unless multiple, independent lines of evidence suggest it is uninformative or
-artefactual. PCA naturally downweights low-information variables, so an over-
-zealous removal strategy risks discarding subtle but real banding-pattern
-information.
+*Note:* A conservative approach is appropriate here. We prefer to retain
+a variable unless multiple, independent lines of evidence suggest it is
+uninformative or artefactual. PCA naturally downweights low-information
+variables, so an over- zealous removal strategy risks discarding subtle
+but real banding-pattern information.
 
----
+------------------------------------------------------------------------
 
 # Scaling Justification
 
 ## Why Scaling Matters
 
-Both PCA and distance-based clustering methods (e.g. $k$-means, hierarchical
-clustering with Euclidean linkage) compute **Euclidean distances** between
-observation vectors. The squared Euclidean distance between two observations
-$\mathbf{x}$ and $\mathbf{y}$ in $p$ dimensions is:
+Both PCA and distance-based clustering methods (e.g. $k$-means,
+hierarchical clustering with Euclidean linkage) compute **Euclidean
+distances** between observation vectors. The squared Euclidean distance
+between two observations $\mathbf{x}$ and $\mathbf{y}$ in $p$ dimensions
+is:
 
 $$
 d^2(\mathbf{x}, \mathbf{y}) = \sum_{j=1}^{p} (x_j - y_j)^2.
 $$
 
-Each variable $j$ contributes a term $(x_j - y_j)^2$. If variable $j$ has a
-range of 500 and variable $k$ has a range of 5, the contribution of $j$ will
-dominate the distance by a factor of roughly $10{,}000$, irrespective of
-whether $j$ is actually more informative for discriminating chromosome classes.
-In other words, **the implicit weighting imposed by unequal scales has no
-scientific justification** in this context.
+Each variable $j$ contributes a term $(x_j - y_j)^2$. If variable $j$
+has a range of 500 and variable $k$ has a range of 5, the contribution
+of $j$ will dominate the distance by a factor of roughly $10{,}000$,
+irrespective of whether $j$ is actually more informative for
+discriminating chromosome classes. In other words, **the implicit
+weighting imposed by unequal scales has no scientific justification** in
+this context.
 
 ## Empirical Evidence
 
@@ -575,17 +594,18 @@ cat("Ratio of max to min raw variance:",
 
 ## Decision
 
-The ratio of the largest to smallest raw variance is substantial (reported above).
-Without standardisation, PCA would effectively become a summary of the highest-
-variance features alone, and $k$-means would partition the data based
-disproportionately on those same features.
+The ratio of the largest to smallest raw variance is substantial
+(reported above). Without standardisation, PCA would effectively become
+a summary of the highest- variance features alone, and $k$-means would
+partition the data based disproportionately on those same features.
 
-**We therefore standardise all variables to zero mean and unit variance before
-any subsequent clustering analysis.** This is implemented via `scale()` or
-equivalently via `prcomp(..., scale. = TRUE)`. The PCA results in Section 3 were
-already computed on scaled data for this reason.
+**We therefore standardise all variables to zero mean and unit variance
+before any subsequent clustering analysis.** This is implemented via
+`scale()` or equivalently via `prcomp(..., scale. = TRUE)`. The PCA
+results in Section 3 were already computed on scaled data for this
+reason.
 
----
+------------------------------------------------------------------------
 
 # Summary of EDA Findings
 
@@ -608,44 +628,47 @@ summary_items <- tribble(
 knitr::kable(summary_items, caption = "Summary of key EDA findings")
 ```
 
-The EDA reveals a moderately high-dimensional feature space with heterogeneous
-scales and scattered missing values. After standardisation and (if warranted)
-variable removal, the first few principal components capture the bulk of the
-variation and the PC1–PC2 projection provides initial visual evidence for the
-number of distinct chromosome classes—to be refined by formal clustering methods
-in subsequent questions.
+The EDA reveals a moderately high-dimensional feature space with
+heterogeneous scales and scattered missing values. After standardisation
+and (if warranted) variable removal, the first few principal components
+capture the bulk of the variation and the PC1–PC2 projection provides
+initial visual evidence for the number of distinct chromosome classes—to
+be refined by formal clustering methods in subsequent questions.
 
----
+------------------------------------------------------------------------
 
 # Question 2 – Cluster Structure and Comparison (40%)
 
-We now compare two clustering pipelines—one based on standard Euclidean distance
-after imputation, and one based on a renormalised observed-only distance—to assess
-how many distinct chromosome classes are present and how sensitive the conclusion
-is to missing-data handling.
+We now compare two clustering pipelines—one based on standard Euclidean
+distance after imputation, and one based on a renormalised observed-only
+distance—to assess how many distinct chromosome classes are present and
+how sensitive the conclusion is to missing-data handling.
 
-Throughout this section we evaluate $k \in \{2,3,4,5,6,7\}$ and use elbow plots
-to guide the choice of $k$.
+Throughout this section we evaluate $k \in \{2,3,4,5,6,7\}$ and use
+elbow plots to guide the choice of $k$.
 
 ## Pipeline A: Standard Euclidean Route
 
 ### Missing-Data Strategy
 
-Two options are available: (i) casewise (complete-case) deletion, which discards
-every row containing at least one `NA`, and (ii) column-mean imputation, which
-replaces each missing value with the mean of its variable.
+Two options are available: (i) casewise (complete-case) deletion, which
+discards every row containing at least one `NA`, and (ii) column-mean
+imputation, which replaces each missing value with the mean of its
+variable.
 
-Casewise deletion is unbiased under MCAR but can discard a large fraction of the
-sample, reducing statistical power. Column-mean imputation preserves sample size
-but **shrinks within-variable variance** (the imputed values all equal the mean)
-and can distort correlation structure. For $k$-means clustering, which partitions
-observations in the full $p$-dimensional space, losing observations is more
-damaging than a modest variance reduction—each deleted row is one fewer data point
-from which to learn cluster geometry. Moreover, the EDA in Section 2 showed that
-missingness is scattered rather than concentrated, so mean imputation introduces
-only minor distortion.
+Casewise deletion is unbiased under MCAR but can discard a large
+fraction of the sample, reducing statistical power. Column-mean
+imputation preserves sample size but **shrinks within-variable
+variance** (the imputed values all equal the mean) and can distort
+correlation structure. For $k$-means clustering, which partitions
+observations in the full $p$-dimensional space, losing observations is
+more damaging than a modest variance reduction—each deleted row is one
+fewer data point from which to learn cluster geometry. Moreover, the EDA
+in Section 2 showed that missingness is scattered rather than
+concentrated, so mean imputation introduces only minor distortion.
 
-**Decision.** We adopt column-mean imputation for the standard Euclidean pipeline.
+**Decision.** We adopt column-mean imputation for the standard Euclidean
+pipeline.
 
 ```{r pipeline-a-impute}
 # Column-mean imputation on the cleaned sampled data
@@ -664,8 +687,9 @@ chromo_scaled <- as.data.frame(scale(chromo_imputed))
 
 ### $k$-Means Clustering for $k = 2, \ldots, 7$
 
-For each $k$ we run $k$-means with `nstart = 25` (to mitigate sensitivity to
-random initialisation) and record the total within-cluster sum of squares
+For each $k$ we run $k$-means with `nstart = 25` (to mitigate
+sensitivity to random initialisation) and record the total
+within-cluster sum of squares
 ($W_k = \sum_{c=1}^{k} \sum_{i \in C_c} \| \mathbf{x}_i - \boldsymbol{\mu}_c \|^2$).
 
 ```{r pipeline-a-kmeans}
@@ -686,10 +710,10 @@ elbow_A <- data.frame(k = k_range, WSS = wss_euclidean)
 
 ### Elbow Plot
 
-The elbow plot displays $W_k$ against $k$. We look for a value of $k$ at which
-the marginal reduction in $W_k$ diminishes sharply—an "elbow"—indicating that
-additional clusters provide diminishing returns in terms of within-cluster
-compactness.
+The elbow plot displays $W_k$ against $k$. We look for a value of $k$ at
+which the marginal reduction in $W_k$ diminishes sharply—an
+"elbow"—indicating that additional clusters provide diminishing returns
+in terms of within-cluster compactness.
 
 ```{r elbow-a, fig.height=5}
 ggplot(elbow_A, aes(x = k, y = WSS)) +
@@ -708,9 +732,10 @@ knitr::kable(elbow_A, digits = 2, format = "markdown",
              caption = "WSS and marginal decrease per k (Euclidean pipeline)")
 ```
 
-**Interpretation.** Inspect the table and plot above. The elbow typically appears
-where the percentage decrease drops noticeably. We select the $k$ at the elbow as
-our preferred number of clusters for this pipeline.
+**Interpretation.** Inspect the table and plot above. The elbow
+typically appears where the percentage decrease drops noticeably. We
+select the $k$ at the elbow as our preferred number of clusters for this
+pipeline.
 
 ```{r select-k-A}
 # ──────────────────────────────────────────────
@@ -724,8 +749,8 @@ km_A <- kmeans_results_A[[which(k_range == chosen_k_A)]]
 
 ### Cluster Visualisation via PCA
 
-We project the imputed, scaled data onto the first two principal components and
-colour each observation by its cluster assignment.
+We project the imputed, scaled data onto the first two principal
+components and colour each observation by its cluster assignment.
 
 ```{r pca-cluster-A, fig.height=7, fig.width=9}
 pca_A <- prcomp(chromo_scaled, center = TRUE, scale. = TRUE)
@@ -746,26 +771,28 @@ cat("Cluster sizes (Euclidean pipeline):\n")
 print(table(km_A$cluster))
 ```
 
----
+------------------------------------------------------------------------
 
 ## Pipeline B: Observed-Only (Renormalised) Distance Route
 
 ### Computing the Renormalised Euclidean Distance
 
-For observations $i$ and $j$, let $O_{ij}$ denote the set of variables observed
-in **both** observations. The renormalised distance is defined as:
+For observations $i$ and $j$, let $O_{ij}$ denote the set of variables
+observed in **both** observations. The renormalised distance is defined
+as:
 
 $$
 d_{ij}^{(\text{obs})} = \sqrt{\frac{p}{|O_{ij}|} \sum_{k \in O_{ij}} (x_{ik} - x_{jk})^2}
 $$
 
-The factor $\frac{p}{|O_{ij}|}$ rescales the partial sum so that the distance is
-comparable to a full-dimensional Euclidean distance. This avoids the bias whereby
-pairs with more missing values (and hence fewer terms in the sum) would appear
-artificially closer together.
+The factor $\frac{p}{|O_{ij}|}$ rescales the partial sum so that the
+distance is comparable to a full-dimensional Euclidean distance. This
+avoids the bias whereby pairs with more missing values (and hence fewer
+terms in the sum) would appear artificially closer together.
 
-We compute this on the **scaled** (but un-imputed) data, so that the variable-
-scale issue addressed in Section 5 is handled before distances are calculated.
+We compute this on the **scaled** (but un-imputed) data, so that the
+variable- scale issue addressed in Section 5 is handled before distances
+are calculated.
 
 ```{r renorm-distance}
 # Scale without imputing: scale() on columns, NA propagated
@@ -806,11 +833,12 @@ dist_obj <- as.dist(dist_obs)
 
 ### Multidimensional Scaling (MDS) Embedding
 
-The renormalised distance matrix is not a standard Euclidean matrix in $\mathbb{R}^p$,
-so we cannot feed it directly to `kmeans()`. Instead we embed the $n$ observations
-into a low-dimensional Euclidean space using **classical (metric) MDS**, which
-finds coordinates $\mathbf{z}_1, \ldots, \mathbf{z}_n \in \mathbb{R}^m$ that best
-preserve the pairwise distances. We choose $m$ to capture the majority of the
+The renormalised distance matrix is not a standard Euclidean matrix in
+$\mathbb{R}^p$, so we cannot feed it directly to `kmeans()`. Instead we
+embed the $n$ observations into a low-dimensional Euclidean space using
+**classical (metric) MDS**, which finds coordinates
+$\mathbf{z}_1, \ldots, \mathbf{z}_n \in \mathbb{R}^m$ that best preserve
+the pairwise distances. We choose $m$ to capture the majority of the
 distance structure.
 
 ```{r mds-embed}
@@ -933,16 +961,16 @@ ggplot(elbow_combined, aes(x = k, y = WSS_norm, colour = Pipeline)) +
   theme_minimal()
 ```
 
----
+------------------------------------------------------------------------
 
 ## Comparison of the Two Clusterings
 
 ### Proportion of Differing Assignments
 
-Because $k$-means cluster labels are arbitrary (cluster "1" in Pipeline A need not
-correspond to cluster "1" in Pipeline B), we first align labels using the
-**best permutation** that maximises agreement. We then compute the proportion of
-observations assigned differently.
+Because $k$-means cluster labels are arbitrary (cluster "1" in Pipeline
+A need not correspond to cluster "1" in Pipeline B), we first align
+labels using the **best permutation** that maximises agreement. We then
+compute the proportion of observations assigned differently.
 
 ```{r compare-clusters}
 library(combinat)  # for permn()

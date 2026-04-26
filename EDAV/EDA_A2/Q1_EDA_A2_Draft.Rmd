@@ -60,7 +60,7 @@ exclusively on this subsample.
 # IMPORTANT: Replace 123 with the last three digits
 # of YOUR College ID before knitting.
 # ──────────────────────────────────────────────────
-set.seed(270)
+set.seed(123)
 
 chromo <- chromo_full[sample(nrow(chromo_full), size = 600, replace = FALSE), ]
 rownames(chromo) <- NULL          # reset row indices for cleanliness
@@ -385,7 +385,6 @@ knitr::kable(loadings_5, digits = 3,
 # Identify variables with negligible contribution to the first k PCs
 k <- 5
 max_abs_loading <- apply(abs(pca_result$rotation[, 1:k]), 1, max)
-low_load_vars <- names(max_abs_loading[max_abs_loading < 0.15])
 
 cat("Variables with max |loading| < 0.15 across first", k, "PCs:\n")
 if (length(low_load_vars) > 0) {
@@ -485,7 +484,7 @@ case-by-case basis.
 
 We synthesise evidence from the missingness analysis (Section 2), the
 near-zero variance check, the PCA loadings, and the correlation analysis
-to make a final decision about which variables to retain.
+to make a final decision about which variables to retain.high_Ff
 
 ```{r removal-decision}
 # Collect candidates from each diagnostic

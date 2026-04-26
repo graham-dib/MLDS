@@ -12,23 +12,17 @@ output:
     code_folding: show
     fig_width: 10
     fig_height: 7
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo = TRUE,
-  message = FALSE,
-  warning = FALSE,
-  fig.align = "center"
-)
-```
 
 # Preamble: Libraries and Data Loading
 
-We begin by loading the packages required for the analysis. Each serves a specific
-purpose: `naniar` for principled missing-data diagnostics, `corrplot` for
-correlation visualisation, `ggplot2` for layered graphics, and
-`factoextra` for PCA extraction utilities.
+We begin by loading the packages required for the analysis. Each serves
+a specific purpose: `naniar` for principled missing-data diagnostics,
+`corrplot` for correlation visualisation, `ggplot2` for layered
+graphics, and `factoextra` for PCA extraction utilities.
 
 ```{r libraries}
 library(tidyverse)
@@ -48,9 +42,10 @@ chromo_full <- read.csv("chromosome_data.csv")
 
 ## Sampling Protocol
 
-The coursework mandates a reproducible subsample of 600 rows drawn without
-replacement. The random seed is set to the **last three digits of the student's
-College ID**. All downstream analysis is conducted exclusively on this subsample.
+The coursework mandates a reproducible subsample of 600 rows drawn
+without replacement. The random seed is set to the **last three digits
+of the student's College ID**. All downstream analysis is conducted
+exclusively on this subsample.
 
 ```{r sampling}
 # ──────────────────────────────────────────────────
@@ -70,9 +65,10 @@ cat("Sampled dataset dimensions:", nrow(chromo), "rows ×", ncol(chromo), "colum
 str(chromo, list.len = 35)
 ```
 
-All 33 variables (`V1`–`V33`) are numeric, which is consistent with quantitative
-features extracted from karyogram image analysis (capturing chromosome size, shape,
-and banding patterns). No categorical or character columns are present.
+All 33 variables (`V1`–`V33`) are numeric, which is consistent with
+quantitative features extracted from karyogram image analysis (capturing
+chromosome size, shape, and banding patterns). No categorical or
+character columns are present.
 
 ## Quick Peek at the Data
 
@@ -83,9 +79,10 @@ tail(chromo, 5)
 
 ## Summary Statistics
 
-We examine the five-number summary plus the mean for every variable to understand
-the **scales** on which the features are reported. If scales differ by orders of
-magnitude, this will have direct implications for distance-based methods later.
+We examine the five-number summary plus the mean for every variable to
+understand the **scales** on which the features are reported. If scales
+differ by orders of magnitude, this will have direct implications for
+distance-based methods later.
 
 ```{r summary-stats}
 summary(chromo)
@@ -111,21 +108,22 @@ knitr::kable(scale_tbl, digits = 2, format = "markdown",
              caption = "Per-variable summary statistics, sorted by range (descending)")
 ```
 
-**Observation on scales.** The table above reveals that the numeric ranges of the
-33 variables differ substantially. Some variables span ranges in the hundreds
-(e.g. size-related features), while others are confined to single-digit intervals
-(e.g. banding-pattern ratios). This heterogeneity in scale is critical: any
-Euclidean-distance-based method (PCA on the covariance matrix, $k$-means
-clustering) will be **dominated by the high-variance features** unless we
-standardise. We revisit this formally in Section 5.
+**Observation on scales.** The table above reveals that the numeric
+ranges of the 33 variables differ substantially. Some variables span
+ranges in the hundreds (e.g. size-related features), while others are
+confined to single-digit intervals (e.g. banding-pattern ratios). This
+heterogeneity in scale is critical: any Euclidean-distance-based method
+(PCA on the covariance matrix, $k$-means clustering) will be **dominated
+by the high-variance features** unless we standardise. We revisit this
+formally in Section 5.
 
----
+------------------------------------------------------------------------
 
 # Quantifying and Visualising Missingness
 
-Missing data can distort multivariate structure and must be diagnosed before any
-imputation or removal decision is taken. We approach this in three stages:
-quantification, pattern analysis, and a removal decision.
+Missing data can distort multivariate structure and must be diagnosed
+before any imputation or removal decision is taken. We approach this in
+three stages: quantification, pattern analysis, and a removal decision.
 
 ## Per-Variable Missingness
 
@@ -146,9 +144,9 @@ ggplot(miss_summary, aes(x = reorder(variable, -pct_miss), y = pct_miss)) +
 
 ## Overall Missingness Map
 
-`vis_miss()` provides a rasterised overview of every cell in the dataset, making
-it easy to see whether missingness is concentrated in specific rows or spread
-uniformly.
+`vis_miss()` provides a rasterised overview of every cell in the
+dataset, making it easy to see whether missingness is concentrated in
+specific rows or spread uniformly.
 
 ```{r vis-miss, fig.height=8}
 vis_miss(chromo, sort_miss = TRUE) +
@@ -157,10 +155,10 @@ vis_miss(chromo, sort_miss = TRUE) +
 
 ## Patterns of Co-Missingness
 
-If two or more variables are *always* missing together, this may signal a shared
-extraction failure in the image pipeline (e.g. a measurement that depends on
-another measurement being successful). We use an UpSet plot to inspect whether
-missingness is **monotone** or **non-monotone**.
+If two or more variables are *always* missing together, this may signal
+a shared extraction failure in the image pipeline (e.g. a measurement
+that depends on another measurement being successful). We use an UpSet
+plot to inspect whether missingness is **monotone** or **non-monotone**.
 
 ```{r miss-upset, fig.height=6}
 n_vars_with_miss <- sum(miss_summary$n_miss > 0)
@@ -173,8 +171,9 @@ if (n_vars_with_miss >= 2) {
 
 ## Per-Observation Missingness
 
-We also check whether certain *observations* carry a disproportionate number of
-missing values—such rows may be unreliable and should be flagged.
+We also check whether certain *observations* carry a disproportionate
+number of missing values—such rows may be unreliable and should be
+flagged.
 
 ```{r miss-per-obs}
 obs_miss <- chromo %>%
@@ -200,21 +199,23 @@ cat("Variables with > 40% missing:",
     ifelse(length(high_miss_vars) == 0, "None", paste(high_miss_vars, collapse = ", ")), "\n")
 ```
 
-If any variable exceeds a high missingness threshold (say 40 %), it provides too
-little information for reliable imputation and should be dropped. Variables with
-moderate missingness (< ~10 %) can be handled via complete-case analysis for PCA
-(which requires a complete numeric matrix), provided the missingness pattern is
-roughly **Missing Completely At Random (MCAR)**. The `vis_miss()` output above
-allows us to assess whether missingness appears systematic or scattered.
+If any variable exceeds a high missingness threshold (say 40 %), it
+provides too little information for reliable imputation and should be
+dropped. Variables with moderate missingness (\< \~10 %) can be handled
+via complete-case analysis for PCA (which requires a complete numeric
+matrix), provided the missingness pattern is roughly **Missing
+Completely At Random (MCAR)**. The `vis_miss()` output above allows us
+to assess whether missingness appears systematic or scattered.
 
----
+------------------------------------------------------------------------
 
 # Examining Multivariate Structure
 
 ## Correlation Analysis
 
-With 33 features, a correlation heatmap is the most efficient way to identify
-redundant (highly collinear) variables and natural groupings among features.
+With 33 features, a correlation heatmap is the most efficient way to
+identify redundant (highly collinear) variables and natural groupings
+among features.
 
 ```{r correlation, fig.height=9, fig.width=10}
 chromo_cc <- chromo %>% drop_na()
@@ -252,17 +253,19 @@ if (nrow(high_cor) > 0) {
 }
 ```
 
-Highly correlated pairs ($|r| > 0.9$) are essentially linearly redundant.
-Retaining both in a distance-based analysis inflates the influence of the latent
-factor they share, which motivates either dropping one member of each pair or,
-more elegantly, using PCA to combine them.
+Highly correlated pairs ($|r| > 0.9$) are essentially linearly
+redundant. Retaining both in a distance-based analysis inflates the
+influence of the latent factor they share, which motivates either
+dropping one member of each pair or, more elegantly, using PCA to
+combine them.
 
 ## Principal Components Analysis (PCA)
 
-PCA is the natural multivariate tool for a dataset of this width. We perform PCA
-on the **scaled** (unit-variance, zero-mean) complete-case data so that all
-variables contribute equally to the decomposition, regardless of their original
-measurement scale. (See Section 5 for the formal justification.)
+PCA is the natural multivariate tool for a dataset of this width. We
+perform PCA on the **scaled** (unit-variance, zero-mean) complete-case
+data so that all variables contribute equally to the decomposition,
+regardless of their original measurement scale. (See Section 5 for the
+formal justification.)
 
 ```{r pca}
 pca_result <- prcomp(chromo_cc, center = TRUE, scale. = TRUE)
@@ -349,7 +352,7 @@ if (length(low_load_vars) > 0) {
 }
 ```
 
----
+------------------------------------------------------------------------
 
 # Identifying Uninformative or Anomalous Variables
 
@@ -378,16 +381,17 @@ if (nrow(nzv_vars) > 0) {
 
 ## Outlier Detection via Modified Z-Scores
 
-Classical $z$-scores are sensitive to the very outliers they attempt to detect.
-A more robust approach uses the **median** and the **Median Absolute Deviation
-(MAD)**:
+Classical $z$-scores are sensitive to the very outliers they attempt to
+detect. A more robust approach uses the **median** and the **Median
+Absolute Deviation (MAD)**:
 
 $$
 M_i = \frac{0.6745 \, (x_i - \widetilde{x})}{\text{MAD}}
 $$
 
-where $\widetilde{x}$ is the median and $\text{MAD} = \text{median}(|x_i - \widetilde{x}|)$.
-A common threshold is $|M_i| > 3.5$ (Iglewicz & Hoaglin, 1993).
+where $\widetilde{x}$ is the median and
+$\text{MAD} = \text{median}(|x_i - \widetilde{x}|)$. A common threshold
+is $|M_i| > 3.5$ (Iglewicz & Hoaglin, 1993).
 
 ```{r outliers}
 modified_z <- chromo_cc %>%
@@ -453,27 +457,28 @@ if (length(vars_to_remove) > 0) {
 }
 ```
 
----
+------------------------------------------------------------------------
 
 # Scaling Justification
 
 ## Why Scaling Matters
 
-Both PCA and distance-based clustering methods (e.g. $k$-means, hierarchical
-clustering with Euclidean linkage) compute **Euclidean distances** between
-observation vectors. The squared Euclidean distance between two observations
-$\mathbf{x}$ and $\mathbf{y}$ in $p$ dimensions is:
+Both PCA and distance-based clustering methods (e.g. $k$-means,
+hierarchical clustering with Euclidean linkage) compute **Euclidean
+distances** between observation vectors. The squared Euclidean distance
+between two observations $\mathbf{x}$ and $\mathbf{y}$ in $p$ dimensions
+is:
 
 $$
 d^2(\mathbf{x}, \mathbf{y}) = \sum_{j=1}^{p} (x_j - y_j)^2.
 $$
 
-Each variable $j$ contributes a term $(x_j - y_j)^2$. If variable $j$ has a
-range of 500 and variable $k$ has a range of 5, the contribution of $j$ will
-dominate the distance by a factor of roughly $10{,}000$, irrespective of
-whether $j$ is actually more informative for discriminating chromosome classes.
-The implicit weighting imposed by unequal scales has **no scientific justification**
-in this context.
+Each variable $j$ contributes a term $(x_j - y_j)^2$. If variable $j$
+has a range of 500 and variable $k$ has a range of 5, the contribution
+of $j$ will dominate the distance by a factor of roughly $10{,}000$,
+irrespective of whether $j$ is actually more informative for
+discriminating chromosome classes. The implicit weighting imposed by
+unequal scales has **no scientific justification** in this context.
 
 ## Empirical Evidence
 
@@ -513,17 +518,18 @@ cat("Ratio of max to min raw variance:",
 
 ## Decision
 
-The ratio of the largest to smallest raw variance is substantial (reported above).
-Without standardisation, PCA would effectively become a summary of the highest-
-variance features alone, and $k$-means would partition the data based
-disproportionately on those same features.
+The ratio of the largest to smallest raw variance is substantial
+(reported above). Without standardisation, PCA would effectively become
+a summary of the highest- variance features alone, and $k$-means would
+partition the data based disproportionately on those same features.
 
-**We therefore standardise all variables to zero mean and unit variance before
-any subsequent clustering analysis.** This is implemented via `scale()` or
-equivalently via `prcomp(..., scale. = TRUE)`. The PCA results in Section 3 were
-already computed on scaled data for this reason.
+**We therefore standardise all variables to zero mean and unit variance
+before any subsequent clustering analysis.** This is implemented via
+`scale()` or equivalently via `prcomp(..., scale. = TRUE)`. The PCA
+results in Section 3 were already computed on scaled data for this
+reason.
 
----
+------------------------------------------------------------------------
 
 # Summary of EDA Findings
 
@@ -547,25 +553,26 @@ knitr::kable(summary_items, format = "markdown",
              caption = "Summary of key EDA findings")
 ```
 
-The EDA reveals a moderately high-dimensional feature space with heterogeneous
-scales and scattered missing values. After standardisation and (if warranted)
-variable removal, the first few principal components capture the bulk of the
-variation and the PC1–PC2 projection provides initial visual evidence for the
-number of distinct chromosome classes—to be refined by formal clustering methods
-in Question 2.
+The EDA reveals a moderately high-dimensional feature space with
+heterogeneous scales and scattered missing values. After standardisation
+and (if warranted) variable removal, the first few principal components
+capture the bulk of the variation and the PC1–PC2 projection provides
+initial visual evidence for the number of distinct chromosome classes—to
+be refined by formal clustering methods in Question 2.
 
----
+------------------------------------------------------------------------
 
 # Question 2 – Cluster Structure and Comparison (40%)
 
 We now compare two clustering pipelines to assess the number of distinct
-chromosome classes present in the dataset. The first (Standard Euclidean) handles
-missingness via imputation and clusters in the original feature space. The second
-(Observed-Only Distance) bypasses imputation by computing distances from shared
-observed coordinates, then embeds via MDS before clustering.
+chromosome classes present in the dataset. The first (Standard
+Euclidean) handles missingness via imputation and clusters in the
+original feature space. The second (Observed-Only Distance) bypasses
+imputation by computing distances from shared observed coordinates, then
+embeds via MDS before clustering.
 
-Throughout, we evaluate $k \in \{2, 3, 4, 5, 6, 7\}$ and use elbow plots of the
-total within-cluster sum of squares ($W_k$) to guide our choice.
+Throughout, we evaluate $k \in \{2, 3, 4, 5, 6, 7\}$ and use elbow plots
+of the total within-cluster sum of squares ($W_k$) to guide our choice.
 
 ## Standard Euclidean Route
 
@@ -573,26 +580,29 @@ total within-cluster sum of squares ($W_k$) to guide our choice.
 
 Two strategies are available:
 
-* **Listwise (casewise) deletion** removes every observation that contains at
-  least one `NA`. This is convenient and unbiased if data are MCAR, but it can
-  drastically reduce $n$ when missingness is spread across many variables. In our
-  EDA (Section 2), we saw that complete cases number only `r nrow(chromo_cc)` out
-  of 600—a potentially significant loss of information for clustering.
+-   **Listwise (casewise) deletion** removes every observation that
+    contains at least one `NA`. This is convenient and unbiased if data
+    are MCAR, but it can drastically reduce $n$ when missingness is
+    spread across many variables. In our EDA (Section 2), we saw that
+    complete cases number only `r nrow(chromo_cc)` out of 600—a
+    potentially significant loss of information for clustering.
 
-* **Column-mean imputation** replaces each missing value with the mean of its
-  variable. This is a fast and simple fix that preserves the full sample size
-  ($n = 600$). However, it is well known that mean imputation **underestimates
-  variance** (because imputed values are placed exactly at the variable mean,
-  shrinking spread) and can **artificially strengthen correlations** between
-  variables, since the imputed values do not reflect the natural scatter of the
-  data. If the data are not MCAR, this bias can be more pronounced.
+-   **Column-mean imputation** replaces each missing value with the mean
+    of its variable. This is a fast and simple fix that preserves the
+    full sample size ($n = 600$). However, it is well known that mean
+    imputation **underestimates variance** (because imputed values are
+    placed exactly at the variable mean, shrinking spread) and can
+    **artificially strengthen correlations** between variables, since
+    the imputed values do not reflect the natural scatter of the data.
+    If the data are not MCAR, this bias can be more pronounced.
 
-**Decision.** We adopt column-mean imputation. The rationale is that our EDA
-showed missingness to be scattered (not concentrated in a few variables or rows),
-suggesting an approximately MCAR pattern. Losing a large fraction of observations
-to listwise deletion would be more harmful to $k$-means—which relies on having
-sufficient observations to estimate cluster centroids—than the modest variance
-underestimation introduced by mean imputation.
+**Decision.** We adopt column-mean imputation. The rationale is that our
+EDA showed missingness to be scattered (not concentrated in a few
+variables or rows), suggesting an approximately MCAR pattern. Losing a
+large fraction of observations to listwise deletion would be more
+harmful to $k$-means—which relies on having sufficient observations to
+estimate cluster centroids—than the modest variance underestimation
+introduced by mean imputation.
 
 ```{r impute-euclidean}
 # Column-mean imputation on the cleaned sampled data
@@ -612,11 +622,11 @@ chromo_scaled <- as.data.frame(scale(chromo_imputed))
 
 ### Running $k$-Means for $k = 2, \ldots, 7$
 
-We use `kmeans()` with `nstart = 25` to run the algorithm from 25 different
-random initialisations and keep the best solution (lowest $W_k$). This guards
-against the well-known sensitivity of $k$-means to its starting configuration,
-making it more likely that we find a stable global minimum rather than a
-poor local one.
+We use `kmeans()` with `nstart = 25` to run the algorithm from 25
+different random initialisations and keep the best solution (lowest
+$W_k$). This guards against the well-known sensitivity of $k$-means to
+its starting configuration, making it more likely that we find a stable
+global minimum rather than a poor local one.
 
 ```{r kmeans-euclidean}
 set.seed(123)
@@ -636,9 +646,9 @@ elbow_A <- data.frame(k = k_range, WSS = wss_A)
 
 ### Elbow Plot
 
-The elbow plot displays $W_k = \texttt{tot.withinss}$ against $k$. We look for
-the "elbow"—the point where adding another cluster yields diminishing returns
-in reducing within-cluster variance.
+The elbow plot displays $W_k = \texttt{tot.withinss}$ against $k$. We
+look for the "elbow"—the point where adding another cluster yields
+diminishing returns in reducing within-cluster variance.
 
 ```{r elbow-euclidean, fig.height=5}
 ggplot(elbow_A, aes(x = k, y = WSS)) +
@@ -657,9 +667,10 @@ knitr::kable(elbow_A, digits = 2, format = "markdown",
              caption = "WSS and marginal decrease per k (Standard Euclidean)")
 ```
 
-**Interpretation.** Inspect the percentage decrease column. A sharp drop followed
-by a levelling off indicates the elbow. For example, if the decrease from $k=3$
-to $k=4$ is large but from $k=4$ to $k=5$ is modest, the elbow is at $k=4$.
+**Interpretation.** Inspect the percentage decrease column. A sharp drop
+followed by a levelling off indicates the elbow. For example, if the
+decrease from $k=3$ to $k=4$ is large but from $k=4$ to $k=5$ is modest,
+the elbow is at $k=4$.
 
 ```{r select-k-A}
 # ──────────────────────────────────────────────────
@@ -674,10 +685,11 @@ km_A <- km_list_A[[which(k_range == chosen_k_A)]]
 
 ### Cluster Visualisation
 
-We project the imputed, scaled data onto its first two principal components using
-`prcomp()` and colour observations by their cluster assignment. We use
-`factoextra::fviz_cluster()` which automatically overlays convex hulls and
-cluster centroids, giving a clear visual impression of cluster separation.
+We project the imputed, scaled data onto its first two principal
+components using `prcomp()` and colour observations by their cluster
+assignment. We use `factoextra::fviz_cluster()` which automatically
+overlays convex hulls and cluster centroids, giving a clear visual
+impression of cluster separation.
 
 ```{r vis-euclidean, fig.height=7, fig.width=9}
 fviz_cluster(km_A, data = chromo_scaled,
@@ -695,33 +707,35 @@ cat("Cluster sizes (Standard Euclidean):\n")
 print(table(km_A$cluster))
 ```
 
-The convex hulls show the spatial extent of each cluster in the PC1–PC2 plane.
-Overlapping hulls suggest that those clusters may be better separated along
-higher-dimensional principal components, or that the true number of groups is
-lower.
+The convex hulls show the spatial extent of each cluster in the PC1–PC2
+plane. Overlapping hulls suggest that those clusters may be better
+separated along higher-dimensional principal components, or that the
+true number of groups is lower.
 
----
+------------------------------------------------------------------------
 
 ## Observed-Only Distance Route
 
 ### Computing the Renormalised Euclidean Distance
 
-Rather than imputing missing values, this approach computes pairwise distances
-using only the coordinates that are **observed for both** observations in a pair.
-The formula provided in the coursework is:
+Rather than imputing missing values, this approach computes pairwise
+distances using only the coordinates that are **observed for both**
+observations in a pair. The formula provided in the coursework is:
 
 $$
 d_{ij}^{(\text{obs})} = \sqrt{\frac{p}{|O_{ij}|} \sum_{k \in O_{ij}} (x_{ik} - x_{jk})^2}
 $$
 
-where $O_{ij}$ is the set of variable indices observed in both observations $i$
-and $j$, and $p$ is the total number of variables. The scaling factor
-$\frac{p}{|O_{ij}|}$ renormalises the partial sum so that the distance is
-comparable in magnitude to a full $p$-dimensional Euclidean distance; without it,
-pairs with more missing data would appear artificially closer.
+where $O_{ij}$ is the set of variable indices observed in both
+observations $i$ and $j$, and $p$ is the total number of variables. The
+scaling factor $\frac{p}{|O_{ij}|}$ renormalises the partial sum so that
+the distance is comparable in magnitude to a full $p$-dimensional
+Euclidean distance; without it, pairs with more missing data would
+appear artificially closer.
 
-We compute this on the **standardised** (but un-imputed) data to ensure all
-variables contribute equally, consistent with the scaling decision from Section 5.
+We compute this on the **standardised** (but un-imputed) data to ensure
+all variables contribute equally, consistent with the scaling decision
+from Section 5.
 
 ```{r renorm-distance}
 # Standardise without imputing (NAs propagated through scale)
@@ -764,15 +778,16 @@ dist_obj <- as.dist(dist_mat)
 
 ### Embedding with Multidimensional Scaling (MDS)
 
-The renormalised distance matrix is not a coordinate matrix, so we cannot pass it
-directly to `kmeans()`. We use **classical (metric) MDS** via `cmdscale()` to
-embed the $n$ observations into a lower-dimensional Euclidean coordinate space
-that preserves the pairwise distances as faithfully as possible.
+The renormalised distance matrix is not a coordinate matrix, so we
+cannot pass it directly to `kmeans()`. We use **classical (metric) MDS**
+via `cmdscale()` to embed the $n$ observations into a lower-dimensional
+Euclidean coordinate space that preserves the pairwise distances as
+faithfully as possible.
 
-We request a 2D embedding ($m = 2$), which is the natural choice for both
-visualisation and consistency with the 2D PCA projection used in the Euclidean
-route. Using 2 dimensions also keeps the $k$-means input low-dimensional, which
-can improve cluster stability.
+We request a 2D embedding ($m = 2$), which is the natural choice for
+both visualisation and consistency with the 2D PCA projection used in
+the Euclidean route. Using 2 dimensions also keeps the $k$-means input
+low-dimensional, which can improve cluster stability.
 
 ```{r mds-embed}
 mds_result <- cmdscale(dist_obj, k = 2, eig = TRUE)
@@ -787,8 +802,8 @@ cat(sprintf("Variance explained by 2D MDS embedding: %.1f%%\n", mds_var_explaine
 
 ### Running $k$-Means on the MDS Coordinates
 
-We now perform $k$-means on the 2D MDS coordinates (not the original 33 variables)
-for $k = 2, \ldots, 7$.
+We now perform $k$-means on the 2D MDS coordinates (not the original 33
+variables) for $k = 2, \ldots, 7$.
 
 ```{r kmeans-mds}
 set.seed(123)
@@ -836,8 +851,9 @@ km_B <- km_list_B[[which(k_range == chosen_k_B)]]
 
 ### Cluster Visualisation in MDS Space
 
-We create a scatterplot of the MDS coordinates ($y_1$ vs $y_2$) coloured by
-cluster assignment, analogous to the PCA projection for the Euclidean route.
+We create a scatterplot of the MDS coordinates ($y_1$ vs $y_2$) coloured
+by cluster assignment, analogous to the PCA projection for the Euclidean
+route.
 
 ```{r vis-mds, fig.height=7, fig.width=9}
 mds_df <- as.data.frame(mds_coords)
@@ -858,16 +874,17 @@ cat("Cluster sizes (Observed-Only MDS):\n")
 print(table(km_B$cluster))
 ```
 
----
+------------------------------------------------------------------------
 
 ## Comparison of the Two Clusterings
 
 ### Step 1: Extracting the Cluster Vectors
 
-The `kmeans()` function returns a component called `cluster`: an $n$-length
-integer vector (values $1, \ldots, k$) indicating the group to which each
-observation has been allocated. We have two such vectors—one from the Standard
-Euclidean Route and one from the Observed-Only Distance Route.
+The `kmeans()` function returns a component called `cluster`: an
+$n$-length integer vector (values $1, \ldots, k$) indicating the group
+to which each observation has been allocated. We have two such
+vectors—one from the Standard Euclidean Route and one from the
+Observed-Only Distance Route.
 
 ```{r extract-labels}
 labels_A <- km_A$cluster   # from Standard Euclidean Route
@@ -879,16 +896,18 @@ cat("Length of Observed-Only cluster vector:", length(labels_B), "\n")
 
 ### Step 2: Addressing the Arbitrary Labelling Problem
 
-Cluster labels are **arbitrary**: what the Euclidean route calls "Cluster 1"
-might be the exact same group of observations that the Observed-Only route calls
-"Cluster 3". Before computing a meaningful proportion of differing assignments,
-we must align the labels so that they refer to the same underlying groups.
+Cluster labels are **arbitrary**: what the Euclidean route calls
+"Cluster 1" might be the exact same group of observations that the
+Observed-Only route calls "Cluster 3". Before computing a meaningful
+proportion of differing assignments, we must align the labels so that
+they refer to the same underlying groups.
 
-We approach this in two ways. First, we **cross-tabulate** the two cluster vectors
-to see which labels from Route A most frequently co-occur with which labels from
-Route B—this is a confusion-matrix-style diagnostic. Second, we **visually
-compare** the partitions using `fviz_cluster()` to see which groups in one plot
-physically correspond to groups in the other.
+We approach this in two ways. First, we **cross-tabulate** the two
+cluster vectors to see which labels from Route A most frequently
+co-occur with which labels from Route B—this is a confusion-matrix-style
+diagnostic. Second, we **visually compare** the partitions using
+`fviz_cluster()` to see which groups in one plot physically correspond
+to groups in the other.
 
 #### Cross-Tabulation (Confusion Matrix)
 
@@ -898,15 +917,16 @@ knitr::kable(cross_tbl, format = "markdown",
              caption = "Cross-tabulation of cluster assignments (raw labels)")
 ```
 
-Each row is a Euclidean cluster; each column is an Observed-Only cluster. A strong
-diagonal (after relabelling) would indicate high agreement. Off-diagonal mass
-indicates observations that "flip" between the two routes.
+Each row is a Euclidean cluster; each column is an Observed-Only
+cluster. A strong diagonal (after relabelling) would indicate high
+agreement. Off-diagonal mass indicates observations that "flip" between
+the two routes.
 
 #### Visual Comparison with `fviz_cluster()`
 
-We use `fviz_cluster()` for each route to see which physical regions of the data
-each label occupies. By comparing the two plots, we can identify which labels in
-Route B correspond to which labels in Route A.
+We use `fviz_cluster()` for each route to see which physical regions of
+the data each label occupies. By comparing the two plots, we can
+identify which labels in Route B correspond to which labels in Route A.
 
 ```{r fviz-compare, fig.height=6, fig.width=12}
 p_euc <- fviz_cluster(km_A, data = chromo_scaled,
@@ -924,9 +944,10 @@ p_obs <- fviz_cluster(km_B, data = mds_coords,
 gridExtra::grid.arrange(p_euc, p_obs, ncol = 2)
 ```
 
-From the cross-tabulation and these visual comparisons, we can determine a label
-mapping. We automate this by trying every permutation of labels for Route B and
-selecting the relabelling that maximises agreement with Route A.
+From the cross-tabulation and these visual comparisons, we can determine
+a label mapping. We automate this by trying every permutation of labels
+for Route B and selecting the relabelling that maximises agreement with
+Route A.
 
 ```{r align-labels}
 if (chosen_k_A == chosen_k_B) {
@@ -973,16 +994,17 @@ if (chosen_k_A == chosen_k_B) {
 }
 ```
 
-After alignment, the diagonal entries represent observations assigned to the
-**same** group by both routes. Off-diagonal entries are the observations that
-shift between groups—the "boundary" points whose assignment is sensitive to the
-choice of method.
+After alignment, the diagonal entries represent observations assigned to
+the **same** group by both routes. Off-diagonal entries are the
+observations that shift between groups—the "boundary" points whose
+assignment is sensitive to the choice of method.
 
 ### Step 3: Calculating and Reporting the Proportion
 
-With labels aligned, computing the proportion of differing assignments is
-straightforward. Following the logic used in the EDA labs (where different
-rankings are compared for stability), we count mismatches and divide by $n$.
+With labels aligned, computing the proportion of differing assignments
+is straightforward. Following the logic used in the EDA labs (where
+different rankings are compared for stability), we count mismatches and
+divide by $n$.
 
 ```{r proportion-diff}
 if (chosen_k_A == chosen_k_B) {
@@ -1003,10 +1025,11 @@ if (chosen_k_A == chosen_k_B) {
 
 #### Do the two routes agree on $k$?
 
-Both elbow plots should be consulted. If the two routes identify the **same**
-optimal $k$, this is already evidence that the underlying cluster structure is
-genuine and robust to preprocessing. If they disagree, it suggests the number of
-groups is sensitive to how missingness is handled.
+Both elbow plots should be consulted. If the two routes identify the
+**same** optimal $k$, this is already evidence that the underlying
+cluster structure is genuine and robust to preprocessing. If they
+disagree, it suggests the number of groups is sensitive to how
+missingness is handled.
 
 ```{r k-agreement}
 cat(sprintf("Euclidean route selected k = %d\n", chosen_k_A))
@@ -1050,10 +1073,10 @@ if (chosen_k_A == chosen_k_B) {
 
 #### Visual Comparison: Where Do the Boundary Observations Shift?
 
-To pinpoint exactly which observations are changing cluster membership, we project
-both sets of labels into the **same PCA score space** from the Euclidean route.
-Observations that change colour between the two plots are the boundary cases
-whose assignment is method-dependent.
+To pinpoint exactly which observations are changing cluster membership,
+we project both sets of labels into the **same PCA score space** from
+the Euclidean route. Observations that change colour between the two
+plots are the boundary cases whose assignment is method-dependent.
 
 ```{r side-by-side, fig.height=6, fig.width=12}
 # PCA projection of the imputed, scaled data
@@ -1105,48 +1128,52 @@ if (chosen_k_A == chosen_k_B) {
 }
 ```
 
-The red points in the plot above are concentrated at the **boundaries** between
-clusters—the regions of the PCA space where the two routes disagree. This is
-expected: observations near the centre of a cluster are unambiguously assigned
-regardless of method, while those in overlapping regions are sensitive to the
-precise geometry and distance metric used.
+The red points in the plot above are concentrated at the **boundaries**
+between clusters—the regions of the PCA space where the two routes
+disagree. This is expected: observations near the centre of a cluster
+are unambiguously assigned regardless of method, while those in
+overlapping regions are sensitive to the precise geometry and distance
+metric used.
 
 #### Possible Reasons for Differences
 
-1. **Missing-data handling.** Mean imputation places every missing value at the
-   variable mean, which **artificially strengthens correlations** between variables
-   and underestimates within-variable variance. This can produce "tighter"
-   clusters in the Euclidean route than the observed-only route, which avoids
-   this distortion entirely by computing distances only from genuinely measured
-   values.
+1.  **Missing-data handling.** Mean imputation places every missing
+    value at the variable mean, which **artificially strengthens
+    correlations** between variables and underestimates within-variable
+    variance. This can produce "tighter" clusters in the Euclidean route
+    than the observed-only route, which avoids this distortion entirely
+    by computing distances only from genuinely measured values.
 
-2. **Geometry: PCA vs MDS.** The Euclidean route clusters in the full
-   $p$-dimensional feature space and visualises via **PCA**, a linear projection
-   that maximises variance. The observed-only route clusters in an **MDS** space
-   that focuses on preserving pairwise distances. These are fundamentally
-   different geometric objectives—maximum variance versus distance
-   preservation—and can yield different low-dimensional arrangements, causing
-   $k$-means to draw different cluster boundaries.
+2.  **Geometry: PCA vs MDS.** The Euclidean route clusters in the full
+    $p$-dimensional feature space and visualises via **PCA**, a linear
+    projection that maximises variance. The observed-only route clusters
+    in an **MDS** space that focuses on preserving pairwise distances.
+    These are fundamentally different geometric objectives—maximum
+    variance versus distance preservation—and can yield different
+    low-dimensional arrangements, causing $k$-means to draw different
+    cluster boundaries.
 
-3. **Scaling.** Both routes standardise to unit variance, but the effective
-   contribution of each variable differs. In the Euclidean route, imputed values
-   dampen a variable's apparent variance (they are all identical to the mean),
-   subtly altering the `scale()` denominator. In the observed-only route,
-   variables with more missing values simply contribute to fewer pairwise
-   distances, naturally diluting their influence without artificial variance
-   compression. PCA and distance-based clustering are highly sensitive to variable
-   scales, and these differing normalisation effects can lead to meaningfully
-   different cluster structures.
+3.  **Scaling.** Both routes standardise to unit variance, but the
+    effective contribution of each variable differs. In the Euclidean
+    route, imputed values dampen a variable's apparent variance (they
+    are all identical to the mean), subtly altering the `scale()`
+    denominator. In the observed-only route, variables with more missing
+    values simply contribute to fewer pairwise distances, naturally
+    diluting their influence without artificial variance compression.
+    PCA and distance-based clustering are highly sensitive to variable
+    scales, and these differing normalisation effects can lead to
+    meaningfully different cluster structures.
 
----
+------------------------------------------------------------------------
 
 # Question 3 – Cluster Interpretation (30%)
 
-Having compared two clustering pipelines in Question 2, we now select our
-**preferred** solution and provide a structured, evidence-based interpretation of
-the chromosome classes it identifies. The interpretation focuses on the internal
-cohesion (within-cluster compactness) and external isolation (between-cluster
-separation) of the identified groups.
+Having compared two clustering pipelines in Question 2, we now select
+our **preferred** solution and provide a structured, evidence-based
+interpretation of the chromosome classes it identifies. The
+interpretation focuses on the internal cohesion (within-cluster
+compactness) and external isolation (between-cluster separation) of the
+identified groups.
 
 ## Selecting the Preferred Pipeline
 
@@ -1172,20 +1199,22 @@ if (preferred == "euclidean") {
 cat("Number of clusters (k):", chosen_k, "\n")
 ```
 
-We select the Standard Euclidean route as our preferred pipeline because it
-operates in the full $p$-dimensional feature space (after imputation and
-standardisation), preserving all 33 variables for interpretation. The MDS route,
-while valuable for comparison, reduces the data to 2 dimensions before clustering,
-discarding information that may be relevant for distinguishing chromosome classes.
-The Euclidean route's centroids are therefore directly interpretable in terms of
-the original features.
+We select the Standard Euclidean route as our preferred pipeline because
+it operates in the full $p$-dimensional feature space (after imputation
+and standardisation), preserving all 33 variables for interpretation.
+The MDS route, while valuable for comparison, reduces the data to 2
+dimensions before clustering, discarding information that may be
+relevant for distinguishing chromosome classes. The Euclidean route's
+centroids are therefore directly interpretable in terms of the original
+features.
 
 ## Constructing Cluster Prototypes (Centroids)
 
-The `kmeans()` function returns a `$centers` component: a $k \times p$ matrix
-where each row is the centroid (mean value of every variable) for one cluster.
-These centroids serve as the **prototypes** for the chromosome classes—they
-represent the "typical" chromosome in each group.
+The `kmeans()` function returns a `$centers` component: a $k \times p$
+matrix where each row is the centroid (mean value of every variable) for
+one cluster. These centroids serve as the **prototypes** for the
+chromosome classes—they represent the "typical" chromosome in each
+group.
 
 ```{r centroids}
 centroids <- as.data.frame(km_preferred$centers)
@@ -1197,11 +1226,11 @@ knitr::kable(centroids_display, digits = 2, format = "markdown",
              caption = "Cluster centroids (standardised scale)")
 ```
 
-Each column represents one of the 33 features (on the standardised scale). Large
-positive values indicate that the cluster prototype scores well above the global
-mean on that feature; large negative values indicate the opposite. By scanning
-across the rows, we can identify which features **distinguish** one cluster
-prototype from another.
+Each column represents one of the 33 features (on the standardised
+scale). Large positive values indicate that the cluster prototype scores
+well above the global mean on that feature; large negative values
+indicate the opposite. By scanning across the rows, we can identify
+which features **distinguish** one cluster prototype from another.
 
 ```{r centroid-heatmap, fig.height=5, fig.width=12}
 # Heatmap of centroids for a compact visual summary
@@ -1218,20 +1247,21 @@ ggplot(centroids_long, aes(x = Variable, y = Cluster, fill = Value)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
 ```
 
-The heatmap provides an immediate visual "fingerprint" for each cluster. Rows
-with strikingly different colour profiles represent well-separated chromosome
-classes; rows with similar profiles suggest classes that may be harder to
-distinguish.
+The heatmap provides an immediate visual "fingerprint" for each cluster.
+Rows with strikingly different colour profiles represent well-separated
+chromosome classes; rows with similar profiles suggest classes that may
+be harder to distinguish.
 
----
+------------------------------------------------------------------------
 
 ## Visualising Cluster Differences
 
 ### PCA Projection with Cluster Boundaries
 
-We use `factoextra::fviz_cluster()` to project all observations onto the first
-two principal components, overlaying convex hulls and cluster centres. This gives
-an immediate sense of separation and overlap between the groups.
+We use `factoextra::fviz_cluster()` to project all observations onto the
+first two principal components, overlaying convex hulls and cluster
+centres. This gives an immediate sense of separation and overlap between
+the groups.
 
 ```{r pca-clusters, fig.height=7, fig.width=9}
 fviz_cluster(km_preferred, data = data_preferred,
@@ -1244,16 +1274,17 @@ fviz_cluster(km_preferred, data = data_preferred,
                            ") – PCA Projection with Convex Hulls"))
 ```
 
-Clusters with non-overlapping convex hulls are well-separated in the PC1–PC2
-plane. Where hulls overlap, the clusters may still be separable along higher
-principal components—the 2D projection can obscure genuine separation in the
-full 33-dimensional space.
+Clusters with non-overlapping convex hulls are well-separated in the
+PC1–PC2 plane. Where hulls overlap, the clusters may still be separable
+along higher principal components—the 2D projection can obscure genuine
+separation in the full 33-dimensional space.
 
 ### Parallel Coordinate Plot of Cluster Centroids
 
-A parallel coordinate plot displays the centroid profile across all 33 variables
-simultaneously. To make variables comparable despite different original scales,
-we apply min–max scaling so that each variable spans [0, 1].
+A parallel coordinate plot displays the centroid profile across all 33
+variables simultaneously. To make variables comparable despite different
+original scales, we apply min–max scaling so that each variable spans
+[0, 1].
 
 ```{r parallel-coords, fig.height=6, fig.width=12}
 # Min-max scale the centroids for visual comparability
@@ -1282,16 +1313,17 @@ ggplot(centroids_minmax_long, aes(x = Variable, y = Value,
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))
 ```
 
-Variables where the centroid lines are **widely spread** are the features that
-most strongly differentiate the chromosome classes. Variables where all lines
-converge to similar values contribute little to cluster separation and may be
-capturing shared biological properties (e.g. common staining characteristics).
+Variables where the centroid lines are **widely spread** are the
+features that most strongly differentiate the chromosome classes.
+Variables where all lines converge to similar values contribute little
+to cluster separation and may be capturing shared biological properties
+(e.g. common staining characteristics).
 
 ### Boxplots of Key Discriminating Variables
 
-To examine the **distributions** (not just means) within each cluster, we use
-faceted boxplots. We focus on variables that the parallel coordinate plot and
-PCA loadings suggest are most discriminating.
+To examine the **distributions** (not just means) within each cluster,
+we use faceted boxplots. We focus on variables that the parallel
+coordinate plot and PCA loadings suggest are most discriminating.
 
 ```{r identify-key-vars}
 # Identify the variables with greatest spread across centroids
@@ -1322,13 +1354,14 @@ ggplot(box_long, aes(x = Cluster, y = Value, fill = Cluster)) +
   theme(legend.position = "none")
 ```
 
-The boxplots reveal not just the **central tendency** (median line) but also the
-**spread** (interquartile range) and **tails** (whiskers and outlier points) of
-each variable's distribution within each cluster. Well-separated boxes with
-non-overlapping notches provide strong evidence that the clusters represent
-genuinely distinct chromosome classes on that feature.
+The boxplots reveal not just the **central tendency** (median line) but
+also the **spread** (interquartile range) and **tails** (whiskers and
+outlier points) of each variable's distribution within each cluster.
+Well-separated boxes with non-overlapping notches provide strong
+evidence that the clusters represent genuinely distinct chromosome
+classes on that feature.
 
----
+------------------------------------------------------------------------
 
 ## Statement on the Number of Chromosome Classes
 
@@ -1353,14 +1386,14 @@ further evidence—both pipelines arriving at a similar partition strengthens
 confidence that the structure is genuine rather than method-dependent.\n")
 ```
 
----
+------------------------------------------------------------------------
 
 ## Within-Cluster Variability
 
-A well-defined cluster should exhibit low within-cluster variation relative to
-the between-cluster variation. We examine the `$withinss` component from the
-`kmeans()` output, which reports the sum of squared deviations from the centroid
-for each individual cluster.
+A well-defined cluster should exhibit low within-cluster variation
+relative to the between-cluster variation. We examine the `$withinss`
+component from the `kmeans()` output, which reports the sum of squared
+deviations from the centroid for each individual cluster.
 
 ```{r within-cluster-var}
 within_ss <- data.frame(
@@ -1427,12 +1460,12 @@ explained by the cluster separation, with the remaining %.1f%% being within-clus
 variation.\n", ratio, ratio, 100 - ratio))
 ```
 
----
+------------------------------------------------------------------------
 
 ## Uncertainty and Sensitivity to Modelling Choices
 
-Any cluster analysis carries inherent uncertainty. We close by acknowledging the
-key sources of uncertainty in our interpretation.
+Any cluster analysis carries inherent uncertainty. We close by
+acknowledging the key sources of uncertainty in our interpretation.
 
 ### Sensitivity to Preprocessing
 
@@ -1466,23 +1499,25 @@ our confidence in the precise number of classes.\n\n")
 
 ### Limitations of Low-Dimensional Visualisation
 
-Although the PCA projection and MDS embedding provide useful visual summaries,
-they compress 33 dimensions into 2. Clusters that appear to overlap in a 2D
-projection may in fact be well-separated along higher principal components. The
-true separation of chromosome classes in the full 33-dimensional feature space
-is **difficult to establish by eye**, and the 2D plots should be interpreted as
-informative summaries rather than definitive evidence of overlap or separation.
+Although the PCA projection and MDS embedding provide useful visual
+summaries, they compress 33 dimensions into 2. Clusters that appear to
+overlap in a 2D projection may in fact be well-separated along higher
+principal components. The true separation of chromosome classes in the
+full 33-dimensional feature space is **difficult to establish by eye**,
+and the 2D plots should be interpreted as informative summaries rather
+than definitive evidence of overlap or separation.
 
 ### Arbitrary Nature of $k$-Means Labels
 
-The cluster labels (1, 2, 3, …) assigned by `kmeans()` are **arbitrary** and
-carry no inherent biological meaning. A different random seed or a different
-value of `nstart` could produce the same partition with permuted labels.
-We used `nstart = 25` to ensure stability of the solution: by running the
-algorithm from 25 independent random initialisations and retaining the best
-(lowest $W_k$), we reduce the risk that the reported partition is a poor local
-optimum. Nevertheless, the partition itself depends on the choice of $k$, the
-distance metric, and the preprocessing—all of which involve judgement.
+The cluster labels (1, 2, 3, …) assigned by `kmeans()` are **arbitrary**
+and carry no inherent biological meaning. A different random seed or a
+different value of `nstart` could produce the same partition with
+permuted labels. We used `nstart = 25` to ensure stability of the
+solution: by running the algorithm from 25 independent random
+initialisations and retaining the best (lowest $W_k$), we reduce the
+risk that the reported partition is a poor local optimum. Nevertheless,
+the partition itself depends on the choice of $k$, the distance metric,
+and the preprocessing—all of which involve judgement.
 
 ### Concluding Remark
 
