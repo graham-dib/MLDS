@@ -24,7 +24,7 @@
 | Applicable Mathematics | 5 | 95% |
 | Programming for Data Science | 5 | Pass (95%) |
 | Exploratory Data Analysis and Visualisation | 5 | Waiting for marking (EDA_A1: 82%) |
-| Supervised Learning | 7.5 | Waiting for marking (SL_A1: 80%) |
+| Supervised Learning | 7.5 | 86% |
 | Ethical Machine Learning and Data Science P1 | 3.75 | 82% |
 | Ethical Machine Learning and Data Science P2 | 3.75 | |
 | Unsupervised Learning | 7.5 |In Progress: Current Term |
