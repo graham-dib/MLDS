@@ -14,8 +14,8 @@ results/
 __pycache__/
 .ipynb_checkpoints/
 
-# Brainstorming scratchpads -- learning aids, not submission material
-scratch/
+# scratch/ holds brainstorming notebooks -- learning aids, not submission material.
+# Tracked so they sync across machines; keep them out of anything submitted.
 
 # PyStan 3 caches compiled models under ~/.cache/httpstan, so nothing local to ignore.
 
