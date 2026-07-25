@@ -1,0 +1,267 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+
+% ---------------------------------------------------------------- code style
+\definecolor{codebg}{gray}{0.97}
+\definecolor{codekw}{RGB}{0,90,160}
+\definecolor{codecm}{RGB}{110,130,110}
+\definecolor{codestr}{RGB}{160,70,40}
+
+\lstdefinestyle{base}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecm}\itshape,
+  stringstyle=\color{codestr},
+  breaklines=true,
+  breakatwhitespace=true,
+  columns=fullflexible,
+  showstringspaces=false,
+  frame=single,
+  rulecolor=\color{gray!40},
+  framesep=4pt,
+  xleftmargin=6pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+}
+\lstdefinestyle{py}{style=base,language=Python}
+\lstdefinelanguage{Stan}{
+  morekeywords={data,parameters,model,generated,quantities,transformed,functions,
+    int,real,vector,matrix,array,lower,upper,normal,bernoulli,bernoulli_logit,
+    Phi,inv_logit,sqrt,target},
+  morecomment=[l]{//},
+  morestring=[b]",
+}
+\lstdefinestyle{stan}{style=base,language=Stan}
+
+% ---------------------------------------------------------------- notation
+\newcommand{\y}{\bm{y}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\z}{\bm{z}}
+\newcommand{\tv}{\bm{t}}
+\newcommand{\Normal}{\mathrm{Normal}}
+\newcommand{\Gam}{\mathrm{Gamma}}
+\newcommand{\GP}{\mathrm{GP}}
+\newcommand{\Bern}{\mathrm{Bernoulli}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\yrep}{\y^{\mathrm{rep}}}
+
+% ---------------------------------------------------------------- code inclusion
+% Segments are pulled verbatim from code/*.py between "# <<tag" and "# >>tag" markers,
+% so the report can never drift out of step with the code that actually ran.
+\lstset{rangeprefix=\#\ ,includerangemarker=false}
+\newcommand{\pycode}[2]{\lstinputlisting[style=py,linerange=<<#2->>#2]{code/#1.py}}
+
+% ---------------------------------------------------------------- generated results
+% code/_report.py writes results/qN.tex as a list of \setresult{key}{value} lines.
+% Cite a number with \result{q1.ppp}; unknown keys render as ?? rather than failing,
+% so the document still compiles before the code has been run.
+\makeatletter
+\newcommand{\setresult}[2]{\expandafter\gdef\csname result@#1\endcsname{#2}}
+\newcommand{\result}[1]{%
+  \ifcsname result@#1\endcsname\csname result@#1\endcsname\else\textbf{??}\fi}
+\makeatother
+\newcommand{\loadresults}[1]{\IfFileExists{results/#1.tex}{\input{results/#1.tex}}{}}
+
+% ---------------------------------------------------------------- marks
+\newcommand{\partmarks}[1]{\hfill\normalfont\mbox{[#1 marks]}}
+\newcommand{\questiontotal}[1]{%
+  \vspace{6pt}\par\hfill\textbf{Question total: #1 Marks}\par}
+\newcommand{\grandtotal}[1]{%
+  \vspace{6pt}\par\hfill\textbf{Total: #1 Marks}\par}
+
+\setlist[itemize]{itemsep=2pt,topsep=3pt}
+\setlist[enumerate]{itemsep=2pt,topsep=3pt}
+
+\title{\vspace{-1.4cm}\textbf{MATH70100 Bayesian Methods \& Computation}\\[4pt]
+       \large Assessed Coursework 2}
+\date{}
+
+\loadresults{q1}
+\loadresults{q2}
+\loadresults{q3}
+
+\begin{document}
+\maketitle
+\vspace{-1.6cm}
+
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{2pt}
+
+\noindent
+TODO: preamble note --- state the computational environment (e.g.\ Python version, NumPy/SciPy/PyStan)
+and name the accompanying notebooks from which the code segments below are reproduced. Record any
+generative AI tools used as a learning aid, per the coursework's academic integrity policy.
+
+\vspace{4pt}
+\noindent\rule{\textwidth}{0.4pt}
+
+% ==========================================================================
+\section*{Question 1}
+% ==========================================================================
+
+\subsection*{(a) Bayes factors and posterior model probabilities \partmarks{3}}
+
+Let
+\begin{equation}
+  p(\y \mid M) = \int p(\y \mid \beta,\sigma^2,M)\, p(\beta,\sigma^2\mid M)\,
+  \mathrm d\beta\,\mathrm d\sigma^2
+  \label{eq:marglik}
+\end{equation}
+denote the marginal likelihood of $\y$ under a model $M$. By
+Definition~7.3.2 the \emph{Bayes factor} in favour of $M_i$ over $M_j$ is
+\begin{equation}
+B_{ij}(\y) \;=\; \frac{p(\y\mid M_i)}{p(\y\mid M_j)}
+\;=\; \frac{\Prob(M_i\mid \y)}{\Prob(M_j\mid \y)}\Bigg/\frac{\Prob(M_i)}{\Prob(M_j)} .
+\label{eq:bf}
+\end{equation}
+
+The second equality in \eqref{eq:bf} shows that $B_{ij}$ is exactly the factor by which the
+data update the prior odds of $M_i$ against $M_j$ into the posterior odds.
+\textcolor{red}{[TODO --- one sentence on why this is important. The prior model weights have
+cancelled, so $B_{ij}$ depends on the data alone, therefore analysts who disagree on the priors still
+agree on $B_{ij}$.]}
+Values $B_{ij}>1$ mean the data favour $M_i$ over $M_j$; $B_{ij}<1$ favours $M_j$.Note
+$B_{ij}=1/B_{ji}$ and $B_{ik}=B_{ij}B_{jk}$, so the three pairwise comparisons among
+$M_1,M_2,M_3$ are determined by any two of them --- in practice one computes all evidences
+once and forms whichever ratios are of interest.
+
+\textcolor{red}{[TODO --- agaain explain why a conventional scale is needed at all. $B_{ij}$ is
+unbounded above and carries no units, so unlike a probability it has no self-evident scale.]}
+Their magnitude is therefore read off the conventional scale of Kass \& Raftery (1995),
+reproduced in Table~7.1 of the notes.
+
+\subsection*{(b) Monte Carlo estimation of the posterior predictive $p$-value \partmarks{4}}
+
+TODO
+
+\subsection*{(c) Marginal likelihoods, posterior model probabilities, preferred model \partmarks{5}}
+
+TODO --- describe the computation, then the code follows.
+
+\pycode{q1_model_choice}{q1c}
+
+TODO --- report the three log marginal likelihoods and posterior probabilities. Numbers are
+cited from the generated results file, e.g.\ $\log p(\y\mid M_1)=\result{q1.logml.M1}$ with
+$\Prob(M_1\mid\y)=\result{q1.post.M1}$, so the text updates whenever the code is re-run. The
+preferred model is $\result{q1.preferred}$.
+
+\subsection*{(d) Fitting the preferred model and the posterior predictive check \partmarks{5}}
+
+TODO
+
+\pycode{q1_model_choice}{q1d}
+
+TODO --- comment on adequacy. The estimated posterior predictive $p$-value is
+$\hat p = \result{q1.ppp}$ (Monte Carlo standard error $\result{q1.ppp.se}$).
+
+% Uncomment once code/q1_model_choice.py has written the figure.
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=\textwidth]{figs/q1_ppc.pdf}
+% \caption*{TODO: caption.}
+% \end{figure}
+
+\subsection*{(e) Most probable, yet poorly fitting \partmarks{3}}
+
+TODO
+
+\questiontotal{20}
+
+\clearpage
+% ==========================================================================
+\section*{Question 2}
+% ==========================================================================
+
+\subsection*{(a) Posterior predictive distribution of $f(t^\star)$ \partmarks{5}}
+
+TODO
+
+\subsection*{(b) Interpretation of $\alpha$, $\rho$ and $\sigma^2$ \partmarks{3}}
+
+TODO
+
+\subsection*{(c) Posterior mean, credible bands and $\Prob(f(5)>0\mid\tv,\y)$ \partmarks{5}}
+
+TODO --- describe the computation, then the code follows.
+
+\pycode{q2_gp_regression}{q2c}
+
+TODO --- report $\Prob(f(5)>0\mid\tv,\y)=\result{q2.prob.positive}$ and discuss.
+
+% \begin{figure}[h]
+% \centering
+% \includegraphics[width=0.82\textwidth]{figs/q2_gp.pdf}
+% \caption*{TODO: caption.}
+% \end{figure}
+
+\subsection*{(d) The Bayes action under asymmetric linear loss \partmarks{4}}
+
+TODO --- identify the Bayes action as a posterior quantile, then evaluate it.
+
+\pycode{q2_gp_regression}{q2d}
+
+TODO --- the Bayes action is $d^\star = \result{q2.bayes.action}$.
+
+\subsection*{(e) Effect of the length-scale: Model A ($\rho=1.5$) versus Model B ($\rho=0.4$) \partmarks{3}}
+
+TODO
+
+\questiontotal{20}
+
+\clearpage
+% ==========================================================================
+\section*{Question 3}
+% ==========================================================================
+
+\subsection*{(a) Posterior density up to proportionality \partmarks{3}}
+
+TODO
+
+\subsection*{(b) Non-conjugacy, and why Stan is convenient \partmarks{2}}
+
+TODO
+
+\subsection*{(c) Stan model code \partmarks{6}}
+
+TODO --- explain the model blocks, then the code follows.
+
+\lstinputlisting[style=stan]{code/probit_regression.stan}
+
+\subsection*{(d) Fitting the Stan model in Python \partmarks{3}}
+
+TODO --- describe the fit and its convergence diagnostics.
+
+\pycode{q3_probit_stan}{q3d}
+
+\subsection*{(e) Posterior estimates \partmarks{3}}
+
+\pycode{q3_probit_stan}{q3e}
+
+TODO --- report $\E[\beta\mid\x,\z]=\result{q3.e.beta}$,
+$\Prob(\beta>0\mid\x,\z)=\result{q3.p.beta.positive}$ and
+$\Prob(z^\star=1\mid x^\star=0.75,\x,\z)=\result{q3.p.zstar}$.
+
+\subsection*{(f) Probit versus logistic regression \partmarks{3}}
+
+TODO
+
+\questiontotal{20}
+
+\vspace{4pt}
+\grandtotal{60}
+
+\end{document}
