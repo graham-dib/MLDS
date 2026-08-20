@@ -27,7 +27,7 @@
 | Supervised Learning | 7.5 | 86% |
 | Ethical Machine Learning and Data Science P1 | 3.75 | 82% |
 | Ethical Machine Learning and Data Science P2 | 3.75 | |
-| Unsupervised Learning | 7.5 |In Progress: Current Term (Assignment 1: 100%)|
+| Unsupervised Learning | 7.5 | 97% |
 | Bayesian Methods and Computation | 7.5 | In Progress: Current Term (Assignemnt 1: 98%)|
 | Learning Agents | 5 | |
 | Unstructured Data Analysis | 7.5 | |
